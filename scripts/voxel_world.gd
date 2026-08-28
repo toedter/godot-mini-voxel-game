@@ -24,6 +24,11 @@ signal world_ready
 @export_range(0.0, 8.0, 0.1) var glow_strength: float = 2.6
 @export_range(0.0, 6.0, 0.05) var glow_pulse_speed: float = 1.1
 @export_range(0.0, 1.0, 0.01) var glow_pulse_depth: float = 0.22
+## Multiplier on the light the mushroom caps cast on their surroundings.
+@export_range(0.0, 4.0, 0.05) var glow_light_energy: float = 1.0
+## How far the cast light reaches before it has faded out completely. Must stay
+## inside detail_distance, since that is where the lights are created.
+@export_range(4.0, 40.0, 0.5) var glow_light_distance: float = 17.0
 @export var player_path: NodePath = ^"../Player"
 
 var gen: TerrainGen
@@ -38,6 +43,11 @@ var _done: Array = []
 var _mutex := Mutex.new()
 var _center := Vector2i(0x7fffffff, 0)
 var _spawned := false
+## Every mushroom light currently in the scene, so the day/night cycle can dim
+## them all at once.
+var _mushroom_lights: Array[OmniLight3D] = []
+var _glow_level := 0.0
+var _glow_time := 0.0
 
 
 func _ready() -> void:
@@ -59,6 +69,13 @@ func haze_materials() -> Array[ShaderMaterial]:
 func glow_material() -> ShaderMaterial:
 	_ensure_materials()
 	return _glow_material
+
+
+## How brightly the mushrooms glow, 0 by day and 1 at night. Drives both the
+## cap shader and the light the caps cast on their surroundings.
+func set_glow_level(amount: float) -> void:
+	_glow_level = amount
+	glow_material().set_shader_parameter("glow_amount", amount)
 
 
 func _ensure_materials() -> void:
@@ -99,10 +116,38 @@ func _spawn_player() -> void:
 	p.global_position = Vector3(0.0, y + 2.0, 0.0)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_update_center(false)
 	_pump_jobs()
 	_integrate_results()
+	_update_lights(delta)
+
+
+## Keeps the point lights in step with the caps: same day/night level, and the
+## same pulse, so a mushroom and the pool of light under it breathe together.
+func _update_lights(delta: float) -> void:
+	_glow_time += delta
+	var eye := Vector3.ZERO
+	var p := get_node_or_null(player_path)
+	if p != null:
+		eye = (p as Node3D).global_position
+	# A chunk only gains lights once it comes within detail_distance, so without
+	# a fade a whole grove would light up the instant it crossed that line.
+	# Fade over the last chunk before the boundary and the switch is invisible.
+	var far: float = minf(glow_light_distance, float(detail_distance) * VoxelDefs.CHUNK_METERS)
+	var near := far * 0.55
+	var alive: Array[OmniLight3D] = []
+	for l in _mushroom_lights:
+		if not is_instance_valid(l):
+			continue
+		alive.append(l)
+		var pulse := 1.0 + glow_pulse_depth * sin(
+			_glow_time * glow_pulse_speed + l.get_meta("phase", 0.0) * TAU)
+		var reach := 1.0 - smoothstep(near, far, l.global_position.distance_to(eye))
+		var e: float = l.get_meta("base_energy", 1.0) * glow_light_energy * _glow_level * pulse * reach
+		l.light_energy = e
+		l.visible = e > 0.005
+	_mushroom_lights = alive
 
 
 func player_chunk() -> Vector2i:
@@ -228,6 +273,20 @@ func _spawn_chunk(c: Vector2i, res: Dictionary) -> Node3D:
 		cs.shape = res["shape"]
 		body.add_child(cs)
 		root.add_child(body)
+	for spec in res.get("lights", []):
+		var light := OmniLight3D.new()
+		light.position = spec["pos"]
+		light.omni_range = spec["radius"]
+		light.light_color = glow_color
+		# Shadows would cost far more than they add for a soft glow that sits
+		# under a cap and mostly lights the ground right below it.
+		light.shadow_enabled = false
+		light.light_energy = 0.0
+		light.visible = false
+		light.set_meta("base_energy", spec["energy"])
+		light.set_meta("phase", spec["phase"])
+		root.add_child(light)
+		_mushroom_lights.append(light)
 	return root
 
 

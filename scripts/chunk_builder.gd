@@ -57,6 +57,9 @@ var _glow_uv := Vector2.ZERO
 ## Local voxel -> phase of the mushroom it belongs to. Written while the
 ## mushroom is placed, because the meshing pass only sees the material.
 var _glow_phase := {}
+## Point lights the mushroom caps cast on their surroundings, in chunk local
+## space. Only filled for chunks close enough to the player to get detail.
+var _lights: Array[Dictionary] = []
 
 var _want_detail := false
 var _want_collision := true
@@ -81,7 +84,7 @@ func _run() -> Dictionary:
 	_mesh_terrain_sides()
 	_mesh_features()
 
-	var result := {"cx": _cx, "cz": _cz, "mesh": null, "shape": null}
+	var result := {"cx": _cx, "cz": _cz, "mesh": null, "shape": null, "lights": _lights}
 	var mesh: ArrayMesh = null
 	if not _verts.is_empty():
 		var arrays := []
@@ -486,15 +489,32 @@ func _add_boulder(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> 
 	_blob_shell(lobes, VoxelDefs.STONE, 0.18)
 
 
+## A group of mushrooms: one big one surrounded by a few smaller ones, so they
+## always come up as a little family rather than as a lone stalk.
+func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fcx: int, fcz: int) -> void:
+	_add_one_mushroom(lx, lz, base_y, rng, _gen.rand01(fcx, fcz, 0x9c0b), 1.0)
+	var count := rng.randi_range(2, 5)
+	var start := rng.randf() * TAU
+	for i in count:
+		# spread around the big one, never further than the margin the feature
+		# scan covers, so no member can reach a chunk that does not know about it
+		var ang := start + TAU * float(i) / float(count) + rng.randf_range(-0.4, 0.4)
+		var dist := rng.randf_range(8.0, 22.0)
+		var mx := lx + int(round(cos(ang) * dist))
+		var mz := lz + int(round(sin(ang) * dist))
+		var scale := rng.randf_range(0.3, 0.72)
+		# each member sits on its own ground height, otherwise the small ones
+		# float or sink on a slope
+		var my := _gen.height_at(_ox + mx, _oz + mz)
+		_add_one_mushroom(mx, mz, my, rng, _gen.rand01(fcx, fcz, 0x9c0b + (i + 1) * 977), scale)
+
+
 ## Big fantasy mushroom: a thick, slightly bent stem carrying a dome shaped cap.
 ## The cap glows from underneath (radial gills) and from spots on its top.
-func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fcx: int, fcz: int) -> void:
-	# One phase per mushroom, derived from its cell rather than from the rng, so
-	# every chunk that meshes a part of this cap agrees on it and the whole cap
-	# pulses as one body.
-	var phase := _gen.rand01(fcx, fcz, 0x9c0b)
-	var stem_h := rng.randi_range(24, 46)
-	var stem_r := rng.randi_range(3, 5)
+## `scale` is 1.0 for the big one in a group and well below that for the rest.
+func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, phase: float, scale: float) -> void:
+	var stem_h := maxi(int(round(float(rng.randi_range(24, 46)) * scale)), 5)
+	var stem_r := maxi(int(round(float(rng.randi_range(3, 5)) * scale)), 1)
 	var lean_x := rng.randf_range(-0.05, 0.05)
 	var lean_z := rng.randf_range(-0.05, 0.05)
 
@@ -522,9 +542,9 @@ func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fc
 	var cz := lz + int(round(float(stem_h) * lean_z))
 	# the cap sinks a little onto the stem so there is no gap at the joint
 	var cap_y := base_y + stem_h - 2
-	var cap_r := rng.randi_range(11, 20)
-	var cap_h := maxi(int(float(cap_r) * rng.randf_range(0.55, 0.8)), 4)
-	var gills := rng.randi_range(9, 16)
+	var cap_r := maxi(int(round(float(rng.randi_range(11, 20)) * scale)), 4)
+	var cap_h := maxi(int(float(cap_r) * rng.randf_range(0.55, 0.8)), 3)
+	var gills := maxi(int(round(float(rng.randi_range(9, 16)) * sqrt(scale))), 5)
 
 	# glowing spots scattered over the dome
 	var spots: Array[Vector3] = []
@@ -563,6 +583,27 @@ func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fc
 							mat = VoxelDefs.SHROOM_GLOW
 							break
 				_put_glow(cx + dx, cap_y + y, cz + dz, mat, phase)
+
+	_add_mushroom_light(cx, base_y, stem_h, cz, cap_r, phase)
+
+
+## A mushroom lights its own patch of ground. Only the chunk the cap sits in
+## records the light, otherwise every neighbour that meshes part of the cap
+## would add one of its own and the spot would be several times too bright.
+func _add_mushroom_light(cx: int, base_y: int, stem_h: int, cz: int, cap_r: int, phase: float) -> void:
+	if not _want_detail:
+		return
+	if cx < 0 or cx >= CS or cz < 0 or cz >= CS:
+		return
+	# Hangs about a third of the way up the stem: high enough to catch the stem
+	# and the cap's underside, low enough to pool on the grass below.
+	var y := float(base_y) + float(stem_h) * 0.35
+	_lights.append({
+		"pos": Vector3(float(cx) * VS, y * VS, float(cz) * VS),
+		"radius": 6.0 + float(cap_r) * 0.7,
+		"energy": 1.3 + float(cap_r) * 0.14,
+		"phase": phase,
+	})
 
 
 ## Places a voxel that may end up on the glow surface, remembering which

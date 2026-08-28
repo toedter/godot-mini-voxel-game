@@ -98,7 +98,7 @@ func _apply_tint(dust: float) -> void:
 		haze = _day.horizon_color()
 		_env.ambient_light_energy = _day.ambient_energy()
 		if _world != null:
-			_world.glow_material().set_shader_parameter("glow_amount", _day.glow_amount())
+			_world.set_glow_level(_day.glow_amount())
 	if _sky != null:
 		curve = _sky.sky_curve
 	# Dust is a warm shift relative to clear air rather than a colour of its
