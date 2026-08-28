@@ -30,7 +30,7 @@ tonemap_white = 2.0
 ssao_enabled = true
 ssao_radius = 0.6
 ssao_intensity = 1.5
-fog_enabled = true
+fog_enabled = false
 fog_light_color = Color(0.7, 0.8, 0.92, 1)
 fog_mode = 1
 fog_density = 1.0
@@ -111,6 +111,7 @@ color = Color(1, 1, 1, 0.75)
 
 [node name="Music" type="AudioStreamPlayer" parent="."]
 script = ExtResource("4_music")
+
 
 
 

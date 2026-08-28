@@ -24,3 +24,38 @@ vec3 voxel_albedo(vec3 world, vec3 world_normal, vec4 color) {
 	vec3 base = pow(clamp(color.rgb, vec3(0.0), vec3(1.0)), vec3(2.2));
 	return base * tint;
 }
+
+// Distance haze.
+//
+// The Environment's own fog fades everything towards a single flat colour, so
+// anything that sticks out above the horizon ends up as a pale silhouette
+// against the blue sky and pops into view the moment its chunk streams in.
+// This fog instead fades towards the colour of the sky in the direction the
+// fragment is seen, so distant geometry dissolves into whatever is behind it.
+// Atmosphere.gd keeps these uniforms in sync with the sky material.
+
+uniform vec3 haze_horizon = vec3(0.7, 0.8, 0.92);
+uniform vec3 haze_top = vec3(0.25, 0.48, 0.9);
+uniform vec3 haze_ground = vec3(0.7, 0.8, 0.92);
+uniform float haze_sky_curve = 0.5;
+uniform float haze_begin = 12.0;
+uniform float haze_end = 34.4;
+uniform float haze_curve = 1.6;
+
+// Same gradient as the ProceduralSkyMaterial of the WorldEnvironment.
+vec3 haze_sky(vec3 dir) {
+	float up = clamp(dir.y, -1.0, 1.0);
+	if (up <= 0.0) {
+		return haze_ground;
+	}
+	float c = 1.0 - acos(up) / (PI * 0.5);
+	float t = clamp(1.0 - pow(1.0 - c, 1.0 / haze_sky_curve), 0.0, 1.0);
+	return mix(haze_horizon, haze_top, t);
+}
+
+// Returns the haze colour in rgb and how much of it covers the fragment in a.
+vec4 haze_over(vec3 view_pos, mat4 inv_view) {
+	float a = pow(smoothstep(haze_begin, haze_end, length(view_pos)), haze_curve);
+	vec3 dir = normalize((inv_view * vec4(view_pos, 0.0)).xyz);
+	return vec4(haze_sky(dir), a);
+}

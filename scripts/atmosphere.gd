@@ -57,18 +57,18 @@ func _apply_range() -> void:
 	if _world != null:
 		reach = float(maxi(_world.view_distance - 1, 1)) * VoxelDefs.CHUNK_METERS
 	reach = maxf(reach - feature_overhang, 8.0)
-	_env.fog_enabled = true
-	_env.fog_mode = Environment.FOG_MODE_DEPTH
-	_env.fog_depth_begin = reach * haze_begin
-	_env.fog_depth_end = reach
-	_env.fog_depth_curve = haze_curve
-	_env.fog_density = 1.0
-	_env.fog_sky_affect = 0.0
-	_env.fog_sun_scatter = 0.1
-	# Aerial perspective is deliberately off: sampling the sky radiance mips
-	# tints fogged geometry slightly differently from the sky behind it, which
-	# makes the world edge *more* visible rather than less.
-	_env.fog_aerial_perspective = 0.0
+	# The voxel shaders fog themselves so that distant geometry fades into the
+	# sky gradient rather than into one flat colour; the Environment's own fog
+	# would only fight with that.
+	_env.fog_enabled = false
+	for m in _materials():
+		m.set_shader_parameter("haze_begin", reach * haze_begin)
+		m.set_shader_parameter("haze_end", reach)
+		m.set_shader_parameter("haze_curve", haze_curve)
+
+
+func _materials() -> Array[ShaderMaterial]:
+	return _world.haze_materials() if _world != null else [] as Array[ShaderMaterial]
 
 
 func _process(delta: float) -> void:
@@ -84,10 +84,23 @@ func _process(delta: float) -> void:
 func _apply_tint(dust: float) -> void:
 	_dust = dust
 	var haze := mist_color.lerp(dust_color, dust)
-	_env.fog_light_color = haze
 	if _sky != null:
 		# the ground hemisphere sits exactly where the terrain fades out, and
 		# the horizon band has to carry the same dust so there is no seam
 		_sky.ground_horizon_color = haze
 		_sky.ground_bottom_color = haze
 		_sky.sky_horizon_color = haze
+	var top := Color(0.25, 0.48, 0.9)
+	var curve := 0.5
+	if _sky != null:
+		top = _sky.sky_top_color
+		curve = _sky.sky_curve
+	# The sky material treats its colours as sRGB, the shader works in linear
+	# space, so the haze has to be converted the same way the sky is.
+	var lin_haze := haze.srgb_to_linear()
+	var lin_top := top.srgb_to_linear()
+	for m in _materials():
+		m.set_shader_parameter("haze_horizon", Vector3(lin_haze.r, lin_haze.g, lin_haze.b))
+		m.set_shader_parameter("haze_ground", Vector3(lin_haze.r, lin_haze.g, lin_haze.b))
+		m.set_shader_parameter("haze_top", Vector3(lin_top.r, lin_top.g, lin_top.b))
+		m.set_shader_parameter("haze_sky_curve", curve)

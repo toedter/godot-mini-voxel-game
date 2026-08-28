@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode cull_back, diffuse_burley, specular_schlick_ggx, fog_disabled;
 
 // Grass tufts. Identical shading to voxel.gdshader, but every voxel is pushed
 // sideways by a travelling wind wave so the grass sways.
@@ -43,7 +43,9 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = voxel_albedo(v_world, v_world_normal, COLOR);
+	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX);
+	ALBEDO = voxel_albedo(v_world, v_world_normal, COLOR) * (1.0 - haze.a);
+	EMISSION = haze.rgb * haze.a;
 	ROUGHNESS = 0.95;
-	SPECULAR = 0.1;
+	SPECULAR = 0.1 * (1.0 - haze.a);
 }

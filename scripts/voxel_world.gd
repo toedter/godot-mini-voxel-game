@@ -36,6 +36,21 @@ var _spawned := false
 
 func _ready() -> void:
 	gen = TerrainGen.new(world_seed)
+	_ensure_materials()
+	_spawn_player()
+	_update_center(true)
+
+
+## The materials are created on demand because Atmosphere, which pushes the
+## haze settings into them, is readied before this node.
+func haze_materials() -> Array[ShaderMaterial]:
+	_ensure_materials()
+	return [_material, _grass_material]
+
+
+func _ensure_materials() -> void:
+	if _material != null:
+		return
 	_material = ShaderMaterial.new()
 	_material.shader = load("res://shaders/voxel.gdshader")
 	_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
@@ -46,8 +61,6 @@ func _ready() -> void:
 	_grass_material.set_shader_parameter("tint_scale", voxel_tint)
 	_grass_material.set_shader_parameter("wind_strength", wind_strength)
 	_grass_material.set_shader_parameter("wind_speed", wind_speed)
-	_spawn_player()
-	_update_center(true)
 
 
 func _exit_tree() -> void:
