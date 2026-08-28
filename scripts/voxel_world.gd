@@ -16,11 +16,15 @@ signal world_ready
 @export var chunks_per_frame: int = 2
 ## Global multiplier for the per-voxel colour variation.
 @export_range(0.0, 3.0, 0.05) var voxel_tint: float = 1.0
+## Peak sway of a grass tuft in metres, and how fast the wind travels.
+@export_range(0.0, 0.2, 0.005) var wind_strength: float = 0.035
+@export_range(0.0, 6.0, 0.05) var wind_speed: float = 1.9
 @export var player_path: NodePath = ^"../Player"
 
 var gen: TerrainGen
 
 var _material: ShaderMaterial
+var _grass_material: ShaderMaterial
 var _chunks := {} # Vector2i -> Dictionary {node, detail, collision}
 var _jobs := {} # Vector2i -> task id
 var _queue: Array[Vector2i] = []
@@ -36,6 +40,12 @@ func _ready() -> void:
 	_material.shader = load("res://shaders/voxel.gdshader")
 	_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
 	_material.set_shader_parameter("tint_scale", voxel_tint)
+	_grass_material = ShaderMaterial.new()
+	_grass_material.shader = load("res://shaders/voxel_grass.gdshader")
+	_grass_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
+	_grass_material.set_shader_parameter("tint_scale", voxel_tint)
+	_grass_material.set_shader_parameter("wind_strength", wind_strength)
+	_grass_material.set_shader_parameter("wind_speed", wind_speed)
 	_spawn_player()
 	_update_center(true)
 
@@ -161,8 +171,14 @@ func _spawn_chunk(c: Vector2i, res: Dictionary) -> Node3D:
 	add_child(root)
 	if res["mesh"] != null:
 		var mi := MeshInstance3D.new()
-		mi.mesh = res["mesh"]
-		mi.material_override = _material
+		var mesh: ArrayMesh = res["mesh"]
+		mi.mesh = mesh
+		var sway_surface: int = res.get("sway_surface", -1)
+		for s in mesh.get_surface_count():
+			mi.set_surface_override_material(s, _grass_material if s == sway_surface else _material)
+		if sway_surface >= 0:
+			# the wind pushes grass a few centimetres outside the baked AABB
+			mi.extra_cull_margin = 0.25
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		root.add_child(mi)
 	if res["shape"] != null:

@@ -29,6 +29,17 @@ var _cols := PackedColorArray()
 var _idx := PackedInt32Array()
 var _col_faces := PackedVector3Array()
 
+# Grass tufts go into a second surface that is drawn with the wind shader.
+# UV carries the sway data: x = stiffness (0 at the ground, 1 at the tip),
+# y = a random phase per tuft.
+var _sway_verts := PackedVector3Array()
+var _sway_norms := PackedVector3Array()
+var _sway_cols := PackedColorArray()
+var _sway_uvs := PackedVector2Array()
+var _sway_idx := PackedInt32Array()
+var _sway := false
+var _sway_uv := Vector2.ZERO
+
 var _want_detail := false
 var _want_collision := true
 
@@ -53,6 +64,7 @@ func _run() -> Dictionary:
 	_mesh_features()
 
 	var result := {"cx": _cx, "cz": _cz, "mesh": null, "shape": null}
+	var mesh: ArrayMesh = null
 	if not _verts.is_empty():
 		var arrays := []
 		arrays.resize(Mesh.ARRAY_MAX)
@@ -60,9 +72,21 @@ func _run() -> Dictionary:
 		arrays[Mesh.ARRAY_NORMAL] = _norms
 		arrays[Mesh.ARRAY_COLOR] = _cols
 		arrays[Mesh.ARRAY_INDEX] = _idx
-		var mesh := ArrayMesh.new()
+		mesh = ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		result["mesh"] = mesh
+	if not _sway_verts.is_empty():
+		var sway_arrays := []
+		sway_arrays.resize(Mesh.ARRAY_MAX)
+		sway_arrays[Mesh.ARRAY_VERTEX] = _sway_verts
+		sway_arrays[Mesh.ARRAY_NORMAL] = _sway_norms
+		sway_arrays[Mesh.ARRAY_COLOR] = _sway_cols
+		sway_arrays[Mesh.ARRAY_TEX_UV] = _sway_uvs
+		sway_arrays[Mesh.ARRAY_INDEX] = _sway_idx
+		if mesh == null:
+			mesh = ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sway_arrays)
+		result["sway_surface"] = mesh.get_surface_count() - 1
+	result["mesh"] = mesh
 	if _want_collision and not _col_faces.is_empty():
 		var shape := ConcavePolygonShape3D.new()
 		shape.set_faces(_col_faces)
@@ -125,6 +149,23 @@ func _m(lx: int, lz: int) -> int:
 ## Emits a quad. Corners must be given counter-clockwise as seen from `n`;
 ## Godot's front faces are clockwise, so the indices are reversed here.
 func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Color, collide: bool) -> void:
+	if _sway:
+		var s := _sway_verts.size()
+		_sway_verts.push_back(a)
+		_sway_verts.push_back(b)
+		_sway_verts.push_back(c)
+		_sway_verts.push_back(d)
+		for k in 4:
+			_sway_norms.push_back(n)
+			_sway_cols.push_back(col)
+			_sway_uvs.push_back(_sway_uv)
+		_sway_idx.push_back(s)
+		_sway_idx.push_back(s + 2)
+		_sway_idx.push_back(s + 1)
+		_sway_idx.push_back(s)
+		_sway_idx.push_back(s + 3)
+		_sway_idx.push_back(s + 2)
+		return
 	var base := _verts.size()
 	_verts.push_back(a)
 	_verts.push_back(b)
@@ -497,6 +538,9 @@ func _mesh_features() -> void:
 		var mat: int = _extras[key]
 		var col := VoxelDefs.color_of(mat)
 		var collide: bool = VoxelDefs.SOLID_FEATURES.has(mat)
+		_sway = mat == VoxelDefs.BLADE
+		if _sway:
+			_sway_uv = _sway_data(p)
 		var x0 := float(p.x) * VS
 		var x1 := x0 + VS
 		var y0 := float(p.y) * VS
@@ -527,3 +571,13 @@ func _mesh_features() -> void:
 			else:
 				_quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0),
 					Vector3.FORWARD, col, collide)
+
+	_sway = false
+
+
+## Wind data baked into the UV of a grass voxel: how stiff it is (0 at the
+## ground, 1 at the tip of a tuft) and a phase that is unique per tuft column
+## so neighbouring tufts do not sway in lockstep.
+func _sway_data(p: Vector3i) -> Vector2:
+	var above := float(p.y - _h(clampi(p.x, -1, CS), clampi(p.z, -1, CS))) * VS
+	return Vector2(clampf(above / 0.4, 0.0, 1.0), _gen.rand01(_ox + p.x, _oz + p.z, 0x21ad))
