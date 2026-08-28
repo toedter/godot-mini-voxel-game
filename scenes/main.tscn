@@ -1,14 +1,15 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/voxel_world.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/player.gd" id="2_player"]
 [ext_resource type="Script" path="res://scripts/hud.gd" id="3_hud"]
 [ext_resource type="Script" path="res://scripts/ambient_music.gd" id="4_music"]
+[ext_resource type="Script" path="res://scripts/atmosphere.gd" id="5_atmo"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_1"]
 sky_top_color = Color(0.25, 0.48, 0.9, 1)
 sky_horizon_color = Color(0.72, 0.83, 0.93, 1)
-sky_curve = 0.15
+sky_curve = 0.5
 ground_bottom_color = Color(0.72, 0.83, 0.93, 1)
 ground_horizon_color = Color(0.72, 0.83, 0.93, 1)
 sun_angle_max = 12.0
@@ -30,9 +31,15 @@ ssao_enabled = true
 ssao_radius = 0.6
 ssao_intensity = 1.5
 fog_enabled = true
-fog_light_color = Color(0.68, 0.79, 0.92, 1)
-fog_density = 0.0022
+fog_light_color = Color(0.7, 0.8, 0.92, 1)
+fog_mode = 1
+fog_density = 1.0
 fog_sky_affect = 0.0
+fog_sun_scatter = 0.1
+fog_aerial_perspective = 1.0
+fog_depth_begin = 12.0
+fog_depth_end = 34.4
+fog_depth_curve = 1.6
 
 [sub_resource type="CapsuleShape3D" id="Capsule_1"]
 radius = 0.3
@@ -42,6 +49,7 @@ height = 1.7
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Env_1")
+script = ExtResource("5_atmo")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.76604444, 0.49240384, -0.4131759, 0, 0.64278764, 0.76604444, 0.6427876, -0.58682406, 0.4924039, 0, 40, 0)
@@ -103,3 +111,7 @@ color = Color(1, 1, 1, 0.75)
 
 [node name="Music" type="AudioStreamPlayer" parent="."]
 script = ExtResource("4_music")
+
+
+
+
