@@ -4,7 +4,8 @@ extends RefCounted
 ## Deterministic, thread-safe terrain description.
 ##
 ## The world is a heightmap of 10 cm voxel columns plus sparse "feature" voxels
-## (trees, cacti, boulders, grass blades) that are placed per feature cell.
+## (trees, cacti, boulders, mushrooms, grass blades) that are placed per feature
+## cell.
 
 const VS := VoxelDefs.VOXEL_SIZE
 ## Size of a feature cell in voxels (equals one chunk => 6.4 m).
@@ -117,12 +118,17 @@ func feature_in_cell(cell_x: int, cell_z: int) -> Dictionary:
 	var b := biome_at(mx, mz)
 
 	if b < 0.5:
-		var density: float = 0.20 + maxf(_n_forest.get_noise_2d(mx, mz), 0.0) * 0.55
+		var forest: float = maxf(_n_forest.get_noise_2d(mx, mz), 0.0)
+		var density: float = 0.20 + forest * 0.55
 		density *= 1.0 - b * 1.6
 		if roll < density:
 			return {"kind": "tree", "x": wx, "z": wz}
 		if roll < density + 0.08:
 			return {"kind": "boulder", "x": wx, "z": wz}
+		# Mushrooms favour the shady, densely wooded spots, so they come up in
+		# small groves rather than being spread evenly over the grassland.
+		if roll < density + 0.08 + 0.035 + forest * 0.10:
+			return {"kind": "mushroom", "x": wx, "z": wz}
 	else:
 		if roll < 0.10 * b:
 			return {"kind": "cactus", "x": wx, "z": wz}

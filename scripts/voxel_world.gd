@@ -19,12 +19,18 @@ signal world_ready
 ## Peak sway of a grass tuft in metres, and how fast the wind travels.
 @export_range(0.0, 0.2, 0.005) var wind_strength: float = 0.035
 @export_range(0.0, 6.0, 0.05) var wind_speed: float = 1.9
+## Colour and intensity of the glow the mushroom caps give off at night.
+@export var glow_color: Color = Color(0.62, 0.30, 1.0)
+@export_range(0.0, 8.0, 0.1) var glow_strength: float = 2.6
+@export_range(0.0, 6.0, 0.05) var glow_pulse_speed: float = 1.1
+@export_range(0.0, 1.0, 0.01) var glow_pulse_depth: float = 0.22
 @export var player_path: NodePath = ^"../Player"
 
 var gen: TerrainGen
 
 var _material: ShaderMaterial
 var _grass_material: ShaderMaterial
+var _glow_material: ShaderMaterial
 var _chunks := {} # Vector2i -> Dictionary {node, detail, collision}
 var _jobs := {} # Vector2i -> task id
 var _queue: Array[Vector2i] = []
@@ -45,7 +51,14 @@ func _ready() -> void:
 ## haze settings into them, is readied before this node.
 func haze_materials() -> Array[ShaderMaterial]:
 	_ensure_materials()
-	return [_material, _grass_material]
+	return [_material, _grass_material, _glow_material]
+
+
+## The material the glowing mushroom caps are drawn with. Atmosphere drives its
+## glow level from the time of day.
+func glow_material() -> ShaderMaterial:
+	_ensure_materials()
+	return _glow_material
 
 
 func _ensure_materials() -> void:
@@ -61,6 +74,15 @@ func _ensure_materials() -> void:
 	_grass_material.set_shader_parameter("tint_scale", voxel_tint)
 	_grass_material.set_shader_parameter("wind_strength", wind_strength)
 	_grass_material.set_shader_parameter("wind_speed", wind_speed)
+	_glow_material = ShaderMaterial.new()
+	_glow_material.shader = load("res://shaders/voxel_glow.gdshader")
+	_glow_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
+	_glow_material.set_shader_parameter("tint_scale", voxel_tint)
+	var lin := glow_color.srgb_to_linear()
+	_glow_material.set_shader_parameter("glow_color", Vector3(lin.r, lin.g, lin.b))
+	_glow_material.set_shader_parameter("glow_strength", glow_strength)
+	_glow_material.set_shader_parameter("pulse_speed", glow_pulse_speed)
+	_glow_material.set_shader_parameter("pulse_depth", glow_pulse_depth)
 
 
 func _exit_tree() -> void:
@@ -187,8 +209,14 @@ func _spawn_chunk(c: Vector2i, res: Dictionary) -> Node3D:
 		var mesh: ArrayMesh = res["mesh"]
 		mi.mesh = mesh
 		var sway_surface: int = res.get("sway_surface", -1)
+		var glow_surface: int = res.get("glow_surface", -1)
 		for s in mesh.get_surface_count():
-			mi.set_surface_override_material(s, _grass_material if s == sway_surface else _material)
+			var m := _material
+			if s == sway_surface:
+				m = _grass_material
+			elif s == glow_surface:
+				m = _glow_material
+			mi.set_surface_override_material(s, m)
 		if sway_surface >= 0:
 			# the wind pushes grass a few centimetres outside the baked AABB
 			mi.extra_cull_margin = 0.25

@@ -6,8 +6,12 @@ extends RefCounted
 ## Terrain is a heightmap, so only the visible top faces and the vertical steps
 ## between neighbouring columns are emitted. Top faces are merged with a 2D
 ## greedy algorithm, step faces are merged along their run direction. Features
-## (trees, cacti, boulders, grass) live in a sparse voxel dictionary and are
-## meshed with simple face culling.
+## (trees, cacti, boulders, mushrooms, grass) live in a sparse voxel dictionary
+## and are meshed with simple face culling.
+##
+## The mesh has up to three surfaces, because some voxels need their own shader:
+## the static one, the wind swayed grass, and the mushroom caps that glow at
+## night.
 
 const CS := VoxelDefs.CHUNK_SIZE
 const VS := VoxelDefs.VOXEL_SIZE
@@ -39,6 +43,20 @@ var _sway_uvs := PackedVector2Array()
 var _sway_idx := PackedInt32Array()
 var _sway := false
 var _sway_uv := Vector2.ZERO
+
+# Glowing mushroom voxels go into a third surface drawn with the glow shader.
+# UV carries the glow data: x = how brightly the voxel lights up, y = a phase
+# that is constant across one mushroom so a cap pulses as a single body.
+var _glow_verts := PackedVector3Array()
+var _glow_norms := PackedVector3Array()
+var _glow_cols := PackedColorArray()
+var _glow_uvs := PackedVector2Array()
+var _glow_idx := PackedInt32Array()
+var _glow := false
+var _glow_uv := Vector2.ZERO
+## Local voxel -> phase of the mushroom it belongs to. Written while the
+## mushroom is placed, because the meshing pass only sees the material.
+var _glow_phase := {}
 
 var _want_detail := false
 var _want_collision := true
@@ -86,6 +104,18 @@ func _run() -> Dictionary:
 			mesh = ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sway_arrays)
 		result["sway_surface"] = mesh.get_surface_count() - 1
+	if not _glow_verts.is_empty():
+		var glow_arrays := []
+		glow_arrays.resize(Mesh.ARRAY_MAX)
+		glow_arrays[Mesh.ARRAY_VERTEX] = _glow_verts
+		glow_arrays[Mesh.ARRAY_NORMAL] = _glow_norms
+		glow_arrays[Mesh.ARRAY_COLOR] = _glow_cols
+		glow_arrays[Mesh.ARRAY_TEX_UV] = _glow_uvs
+		glow_arrays[Mesh.ARRAY_INDEX] = _glow_idx
+		if mesh == null:
+			mesh = ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, glow_arrays)
+		result["glow_surface"] = mesh.get_surface_count() - 1
 	result["mesh"] = mesh
 	if _want_collision and not _col_faces.is_empty():
 		var shape := ConcavePolygonShape3D.new()
@@ -165,6 +195,30 @@ func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Colo
 		_sway_idx.push_back(s)
 		_sway_idx.push_back(s + 3)
 		_sway_idx.push_back(s + 2)
+		return
+	if _glow:
+		var g := _glow_verts.size()
+		_glow_verts.push_back(a)
+		_glow_verts.push_back(b)
+		_glow_verts.push_back(c)
+		_glow_verts.push_back(d)
+		for k in 4:
+			_glow_norms.push_back(n)
+			_glow_cols.push_back(col)
+			_glow_uvs.push_back(_glow_uv)
+		_glow_idx.push_back(g)
+		_glow_idx.push_back(g + 2)
+		_glow_idx.push_back(g + 1)
+		_glow_idx.push_back(g)
+		_glow_idx.push_back(g + 3)
+		_glow_idx.push_back(g + 2)
+		if collide and _want_collision:
+			_col_faces.push_back(a)
+			_col_faces.push_back(c)
+			_col_faces.push_back(b)
+			_col_faces.push_back(a)
+			_col_faces.push_back(d)
+			_col_faces.push_back(c)
 		return
 	var base := _verts.size()
 	_verts.push_back(a)
@@ -331,6 +385,8 @@ func _place_features() -> void:
 					_add_cactus(lx, lz, base_y, rng)
 				"boulder":
 					_add_boulder(lx, lz, base_y, rng)
+				"mushroom":
+					_add_mushroom(lx, lz, base_y, rng, fcx, fcz)
 	if _want_detail:
 		_add_ground_cover()
 
@@ -428,6 +484,94 @@ func _add_boulder(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> 
 		"r": Vector3i(rad, int(rad * 0.8), rad + rng.randi_range(-2, 2)),
 	}]
 	_blob_shell(lobes, VoxelDefs.STONE, 0.18)
+
+
+## Big fantasy mushroom: a thick, slightly bent stem carrying a dome shaped cap.
+## The cap glows from underneath (radial gills) and from spots on its top.
+func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fcx: int, fcz: int) -> void:
+	# One phase per mushroom, derived from its cell rather than from the rng, so
+	# every chunk that meshes a part of this cap agrees on it and the whole cap
+	# pulses as one body.
+	var phase := _gen.rand01(fcx, fcz, 0x9c0b)
+	var stem_h := rng.randi_range(24, 46)
+	var stem_r := rng.randi_range(3, 5)
+	var lean_x := rng.randf_range(-0.05, 0.05)
+	var lean_z := rng.randf_range(-0.05, 0.05)
+
+	# stem: hollow ring, flaring out towards the foot
+	for y in range(-2, stem_h):
+		var t := float(y) / float(stem_h)
+		var flare := 1.0 + pow(1.0 - t, 3.0) * 0.8
+		var r := maxi(int(round(float(stem_r) * flare)), 1)
+		var r2 := r * r
+		var cxo := int(round(float(y) * lean_x))
+		var czo := int(round(float(y) * lean_z))
+		for dz in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				var dd := dx * dx + dz * dz
+				if dd > r2:
+					continue
+				var ring := (dx + 1) * (dx + 1) + dz * dz > r2 \
+					or (dx - 1) * (dx - 1) + dz * dz > r2 \
+					or dx * dx + (dz + 1) * (dz + 1) > r2 \
+					or dx * dx + (dz - 1) * (dz - 1) > r2
+				if ring or y < 1:
+					_put(lx + cxo + dx, base_y + y, lz + czo + dz, VoxelDefs.SHROOM_STEM)
+
+	var cx := lx + int(round(float(stem_h) * lean_x))
+	var cz := lz + int(round(float(stem_h) * lean_z))
+	# the cap sinks a little onto the stem so there is no gap at the joint
+	var cap_y := base_y + stem_h - 2
+	var cap_r := rng.randi_range(11, 20)
+	var cap_h := maxi(int(float(cap_r) * rng.randf_range(0.55, 0.8)), 4)
+	var gills := rng.randi_range(9, 16)
+
+	# glowing spots scattered over the dome
+	var spots: Array[Vector3] = []
+	for i in rng.randi_range(3, 6):
+		var a := rng.randf() * TAU
+		var st := rng.randf_range(0.1, 0.8)
+		var sr := float(cap_r) * sqrt(maxf(1.0 - st * st, 0.0))
+		spots.append(Vector3(cos(a) * sr, st * float(cap_h), sin(a) * sr))
+	var spot_r2 := pow(maxf(float(cap_r) * 0.22, 2.0), 2.0)
+
+	for y in range(0, cap_h + 1):
+		var t := float(y) / float(cap_h)
+		var r := float(cap_r) * sqrt(maxf(1.0 - t * t, 0.0))
+		var ri := int(round(r))
+		var r2 := r * r
+		var inner := maxf(r - 2.2, 0.0)
+		var inner2 := inner * inner
+		for dz in range(-ri, ri + 1):
+			for dx in range(-ri, ri + 1):
+				var dd := float(dx * dx + dz * dz)
+				if dd > r2:
+					continue
+				# only the shell is kept: the outer skin plus the underside
+				if dd < inner2 and y > 0:
+					continue
+				var mat := VoxelDefs.SHROOM_CAP
+				if y == 0:
+					# radial gills, every other wedge lit
+					var ang := atan2(float(dz), float(dx))
+					var wedge := int(floor((ang + PI) / TAU * float(gills) * 2.0))
+					mat = VoxelDefs.SHROOM_GLOW if wedge % 2 == 0 else VoxelDefs.SHROOM_CAP
+				else:
+					var p := Vector3(float(dx), float(y), float(dz))
+					for s in spots:
+						if p.distance_squared_to(s) < spot_r2:
+							mat = VoxelDefs.SHROOM_GLOW
+							break
+				_put_glow(cx + dx, cap_y + y, cz + dz, mat, phase)
+
+
+## Places a voxel that may end up on the glow surface, remembering which
+## mushroom it belongs to.
+func _put_glow(x: int, y: int, z: int, mat: int, phase: float) -> void:
+	_put(x, y, z, mat)
+	var key := Vector3i(x, y, z)
+	if _extras.has(key):
+		_glow_phase[key] = phase
 
 
 ## Small grass tufts / desert pebbles, only generated for nearby chunks.
@@ -541,6 +685,9 @@ func _mesh_features() -> void:
 		_sway = mat == VoxelDefs.BLADE
 		if _sway:
 			_sway_uv = _sway_data(p)
+		_glow = VoxelDefs.GLOW.has(mat)
+		if _glow:
+			_glow_uv = Vector2(VoxelDefs.GLOW[mat], _glow_phase.get(p, 0.0))
 		var x0 := float(p.x) * VS
 		var x1 := x0 + VS
 		var y0 := float(p.y) * VS
@@ -573,6 +720,7 @@ func _mesh_features() -> void:
 					Vector3.FORWARD, col, collide)
 
 	_sway = false
+	_glow = false
 
 
 ## Wind data baked into the UV of a grass voxel: how stiff it is (0 at the

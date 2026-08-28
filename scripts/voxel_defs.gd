@@ -20,6 +20,9 @@ const WOOD := 6
 const LEAF := 7
 const CACTUS := 8
 const BLADE := 9
+const SHROOM_STEM := 10
+const SHROOM_CAP := 11
+const SHROOM_GLOW := 12
 
 const COLORS := {
 	GRASS: Color(0.310, 0.600, 0.180),
@@ -31,6 +34,9 @@ const COLORS := {
 	LEAF: Color(0.235, 0.500, 0.155),
 	CACTUS: Color(0.275, 0.500, 0.235),
 	BLADE: Color(0.360, 0.680, 0.210),
+	SHROOM_STEM: Color(0.780, 0.735, 0.690),
+	SHROOM_CAP: Color(0.360, 0.170, 0.480),
+	SHROOM_GLOW: Color(0.640, 0.380, 0.900),
 }
 
 ## Per-material strength of the random per-voxel brightness variation.
@@ -45,6 +51,17 @@ const TINT := {
 	LEAF: 0.13,
 	CACTUS: 0.09,
 	BLADE: 0.22,
+	SHROOM_STEM: 0.11,
+	SHROOM_CAP: 0.14,
+	SHROOM_GLOW: 0.08,
+}
+
+## Materials drawn with the glow shader, and how brightly each one lights up
+## once it gets dark. The cap only smoulders; the gills and spots carry the
+## actual light.
+const GLOW := {
+	SHROOM_CAP: 0.18,
+	SHROOM_GLOW: 1.0,
 }
 
 ## Material shown on the vertical sides underneath the surface voxel.
@@ -57,7 +74,7 @@ const SUBSURFACE := {
 }
 
 ## Materials that the player collides with (leaves and grass are walk-through).
-const SOLID_FEATURES := {WOOD: true, CACTUS: true, STONE: true}
+const SOLID_FEATURES := {WOOD: true, CACTUS: true, STONE: true, SHROOM_STEM: true, SHROOM_CAP: true}
 
 ## Returns the material colour; the alpha channel carries the per-voxel tint
 ## strength, which the voxel shader reads (the surface itself stays opaque).

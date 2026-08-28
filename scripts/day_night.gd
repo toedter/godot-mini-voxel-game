@@ -94,6 +94,13 @@ func ambient_energy() -> float:
 	return lerpf(0.06, 0.35, smoothstep(-0.05, 0.25, sun_height))
 
 
+## How strongly the mushroom caps light up. They start catching on as the sun
+## goes down and are at full strength once it is properly dark, which is a wider
+## window than the sky fade so the glow appears gradually during dusk.
+func glow_amount() -> float:
+	return 1.0 - smoothstep(-0.18, 0.16, sun_height)
+
+
 func clock_text() -> String:
 	var minutes := int(round(time_of_day * 1440.0)) % 1440
 	return "%02d:%02d" % [minutes / 60, minutes % 60]
