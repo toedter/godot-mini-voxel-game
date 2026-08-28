@@ -9,9 +9,13 @@ uniform float voxel_size = 0.1;
 uniform float tint_scale : hint_range(0.0, 3.0) = 1.0;
 
 varying vec3 v_world;
+varying vec3 v_world_normal;
 
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// NORMAL is model space here; in fragment() it would already be view space,
+	// which would offset the voxel grid depending on where the camera looks.
+	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
 float hash13(vec3 p) {
@@ -21,8 +25,9 @@ float hash13(vec3 p) {
 }
 
 void fragment() {
-	// Nudge inwards so faces sample the cube they belong to, not the neighbour.
-	vec3 cell = floor((v_world - NORMAL * (voxel_size * 0.5)) / voxel_size);
+	// Step half a voxel along the inward normal so a face samples the cube it
+	// belongs to instead of landing exactly on the boundary with its neighbour.
+	vec3 cell = floor((v_world - v_world_normal * (voxel_size * 0.5)) / voxel_size);
 	float h = hash13(cell);
 	float tint = 1.0 + (h - 0.5) * 2.0 * COLOR.a * tint_scale;
 	// Vertex colours are authored in sRGB, the renderer works in linear space.
