@@ -303,7 +303,7 @@ func _unload_far() -> void:
 
 
 func biome_name_at(pos: Vector3) -> String:
-	return "Desert" if gen.biome_at(pos.x, pos.z) >= 0.5 else "Grassland"
+	return "Desert" if gen.is_desert(pos.x, pos.z) else "Grassland"
 
 
 func loaded_chunks() -> int:

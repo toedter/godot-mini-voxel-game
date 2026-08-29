@@ -134,8 +134,8 @@ func _run() -> Dictionary:
 func _sample_columns() -> void:
 	_heights.resize(MS * MS)
 	_mats.resize(MS * MS)
-	var biomes := PackedFloat32Array()
-	biomes.resize(MS * MS)
+	var desert_flags := PackedByteArray()
+	desert_flags.resize(MS * MS)
 
 	for lz in range(-1, CS + 1):
 		for lx in range(-1, CS + 1):
@@ -143,7 +143,7 @@ func _sample_columns() -> void:
 			var mx := float(_ox + lx) * VS
 			var mz := float(_oz + lz) * VS
 			_heights[i] = int(floor(_gen.height_meters(mx, mz) / VS))
-			biomes[i] = _gen.biome_at(mx, mz)
+			desert_flags[i] = 1 if _gen.is_desert(mx, mz) else 0
 
 	for lz in range(-1, CS + 1):
 		for lx in range(-1, CS + 1):
@@ -154,7 +154,7 @@ func _sample_columns() -> void:
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx + 1, lz)]))
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz - 1)]))
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz + 1)]))
-			var desert := biomes[i] >= 0.5
+			var desert := desert_flags[i] != 0
 			var m := VoxelDefs.SAND if desert else VoxelDefs.GRASS
 			if slope > 16:
 				m = VoxelDefs.STONE
