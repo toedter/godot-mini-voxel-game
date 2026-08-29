@@ -26,7 +26,7 @@ func _process(_delta: float) -> void:
 	if _world == null or _player == null:
 		return
 	var p := _player.global_position
-	var hint := "WASD move   Shift sprint   Space jump   Mouse look   Esc release cursor"
+	var hint := "WASD move   Shift sprint   Space jump / swim up   Ctrl dive   Mouse look   Esc release cursor"
 	if _music != null:
 		hint += "   M music: %s" % ("on" if _music.is_music_enabled() else "off")
 	if _day != null:

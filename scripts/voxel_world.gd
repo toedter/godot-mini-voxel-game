@@ -29,6 +29,12 @@ signal world_ready
 ## How far the cast light reaches before it has faded out completely. Must stay
 ## inside detail_distance, since that is where the lights are created.
 @export_range(4.0, 40.0, 0.5) var glow_light_distance: float = 17.0
+## Side length (m) of the sea plane that follows the player. Only has to reach
+## past the point where the haze has closed in completely.
+@export_range(40.0, 600.0, 10.0) var water_extent: float = 340.0
+## Size (m) of one quad of the sea plane. Smaller means the swell is carried by
+## the geometry rather than only by the shading.
+@export_range(0.5, 8.0, 0.1) var water_quad: float = 2.0
 @export var player_path: NodePath = ^"../Player"
 
 var gen: TerrainGen
@@ -36,6 +42,8 @@ var gen: TerrainGen
 var _material: ShaderMaterial
 var _grass_material: ShaderMaterial
 var _glow_material: ShaderMaterial
+var _water_material: ShaderMaterial
+var _water: MeshInstance3D
 var _chunks := {} # Vector2i -> Dictionary {node, detail, collision}
 var _jobs := {} # Vector2i -> task id
 var _queue: Array[Vector2i] = []
@@ -53,6 +61,7 @@ var _glow_time := 0.0
 func _ready() -> void:
 	gen = TerrainGen.new(world_seed)
 	_ensure_materials()
+	_create_water()
 	_spawn_player()
 	_update_center(true)
 
@@ -61,7 +70,7 @@ func _ready() -> void:
 ## haze settings into them, is readied before this node.
 func haze_materials() -> Array[ShaderMaterial]:
 	_ensure_materials()
-	return [_material, _grass_material, _glow_material]
+	return [_material, _grass_material, _glow_material, _water_material]
 
 
 ## The material the glowing mushroom caps are drawn with. Atmosphere drives its
@@ -69,6 +78,12 @@ func haze_materials() -> Array[ShaderMaterial]:
 func glow_material() -> ShaderMaterial:
 	_ensure_materials()
 	return _glow_material
+
+
+## The sea's material. Atmosphere hazes it over a longer range than the rest.
+func sea_material() -> ShaderMaterial:
+	_ensure_materials()
+	return _water_material
 
 
 ## How brightly the mushrooms glow, 0 by day and 1 at night. Drives both the
@@ -100,6 +115,39 @@ func _ensure_materials() -> void:
 	_glow_material.set_shader_parameter("glow_strength", glow_strength)
 	_glow_material.set_shader_parameter("pulse_speed", glow_pulse_speed)
 	_glow_material.set_shader_parameter("pulse_depth", glow_pulse_depth)
+	_water_material = ShaderMaterial.new()
+	_water_material.shader = load("res://shaders/water.gdshader")
+
+
+## The sea is a single plane that is kept centred on the player. Its waves are
+## a function of world position, so sliding it along produces no visible motion
+## of its own; it is snapped to whole quads anyway so that the tessellation
+## never crawls through the swell.
+func _create_water() -> void:
+	var subdiv := maxi(int(round(water_extent / water_quad)) - 1, 1)
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(water_extent, water_extent)
+	plane.subdivide_width = subdiv
+	plane.subdivide_depth = subdiv
+	_water = MeshInstance3D.new()
+	_water.name = "Sea"
+	_water.mesh = plane
+	_water.material_override = _water_material
+	# A flat plane has a zero height AABB, and the waves push it out of that.
+	_water.extra_cull_margin = 2.0
+	_water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_water)
+	_update_water()
+
+
+func _update_water() -> void:
+	if _water == null:
+		return
+	var p := get_node_or_null(player_path)
+	var pos := Vector3.ZERO if p == null else (p as Node3D).global_position
+	var step: float = maxf(water_extent / float(maxi(_water.mesh.subdivide_width + 1, 1)), 0.01)
+	_water.global_position = Vector3(
+		snappedf(pos.x, step), VoxelDefs.SEA_LEVEL, snappedf(pos.z, step))
 
 
 func _exit_tree() -> void:
@@ -112,12 +160,29 @@ func _spawn_player() -> void:
 	var p := get_node_or_null(player_path)
 	if p == null:
 		return
-	var y := gen.ground_y(0.0, 0.0)
-	p.global_position = Vector3(0.0, y + 2.0, 0.0)
+	var spot := _dry_spawn_point()
+	p.global_position = Vector3(spot.x, gen.ground_y(spot.x, spot.y) + 2.0, spot.y)
+
+
+## The island's dome is always above water, but the hills on top of it can dip,
+## so the spawn walks outwards in a spiral until it finds solid dry ground.
+func _dry_spawn_point() -> Vector2:
+	var min_y := VoxelDefs.SEA_LEVEL + 0.6
+	if gen.height_meters(0.0, 0.0) >= min_y:
+		return Vector2.ZERO
+	for ring in range(1, 25):
+		var r := float(ring) * 8.0
+		for i in 12:
+			var a := TAU * float(i) / 12.0
+			var c := Vector2(cos(a) * r, sin(a) * r)
+			if gen.height_meters(c.x, c.y) >= min_y:
+				return c
+	return Vector2.ZERO
 
 
 func _process(delta: float) -> void:
 	_update_center(false)
+	_update_water()
 	_pump_jobs()
 	_integrate_results()
 	_update_lights(delta)
@@ -303,6 +368,11 @@ func _unload_far() -> void:
 
 
 func biome_name_at(pos: Vector3) -> String:
+	var g := gen.height_meters(pos.x, pos.z)
+	if g < VoxelDefs.SEA_LEVEL - 0.05:
+		return "Ocean"
+	if g < gen.beach_top(pos.x, pos.z):
+		return "Beach"
 	return "Desert" if gen.is_desert(pos.x, pos.z) else "Grassland"
 
 

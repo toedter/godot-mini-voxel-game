@@ -160,6 +160,22 @@ func _sample_columns() -> void:
 				m = VoxelDefs.STONE
 			elif slope > 6:
 				m = VoxelDefs.SANDSTONE if desert else VoxelDefs.DIRT
+
+			# The sea overrules the biome: the island is ringed by a beach that
+			# carries on below the waterline and darkens into the sea bed.
+			# Steep faces stay rock, so cliffs still drop straight into the water.
+			var surface := float(h) * VS
+			if surface < VoxelDefs.SEA_LEVEL + 2.2 and slope <= 16:
+				var mx := float(_ox + lx) * VS
+				var mz := float(_oz + lz) * VS
+				# Both limits ride on the same jittered value, so neither the
+				# top of the beach nor the start of the sea bed runs along a
+				# clean contour line.
+				var bt := _gen.beach_top(mx, mz)
+				if surface < bt - 3.9:
+					m = VoxelDefs.SEABED
+				elif surface < bt:
+					m = VoxelDefs.SAND
 			_mats[i] = m
 
 

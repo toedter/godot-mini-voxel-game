@@ -9,6 +9,9 @@ const VOXEL_SIZE := 0.1
 const CHUNK_SIZE := 64
 ## Side length of a chunk in meters.
 const CHUNK_METERS := CHUNK_SIZE * VOXEL_SIZE
+## World Y (meters) of the sea surface. Everything below it is under water.
+## The island is shaped around this value, so raising it floods the coast.
+const SEA_LEVEL := 18.0
 
 const AIR := 0
 const GRASS := 1
@@ -23,6 +26,7 @@ const BLADE := 9
 const SHROOM_STEM := 10
 const SHROOM_CAP := 11
 const SHROOM_GLOW := 12
+const SEABED := 13
 
 const COLORS := {
 	GRASS: Color(0.310, 0.600, 0.180),
@@ -37,6 +41,7 @@ const COLORS := {
 	SHROOM_STEM: Color(0.780, 0.735, 0.690),
 	SHROOM_CAP: Color(0.360, 0.170, 0.480),
 	SHROOM_GLOW: Color(0.640, 0.380, 0.900),
+	SEABED: Color(0.545, 0.520, 0.430),
 }
 
 ## Per-material strength of the random per-voxel brightness variation.
@@ -54,6 +59,7 @@ const TINT := {
 	SHROOM_STEM: 0.11,
 	SHROOM_CAP: 0.14,
 	SHROOM_GLOW: 0.08,
+	SEABED: 0.20,
 }
 
 ## Materials drawn with the glow shader, and how brightly each one lights up
@@ -71,6 +77,7 @@ const SUBSURFACE := {
 	SAND: SANDSTONE,
 	SANDSTONE: SANDSTONE,
 	STONE: STONE,
+	SEABED: SANDSTONE,
 }
 
 ## Materials that the player collides with (leaves and grass are walk-through).

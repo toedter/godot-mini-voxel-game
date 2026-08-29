@@ -11,12 +11,21 @@ extends CharacterBody3D
 @export var accel_air := 3.0
 ## Maximum height (m) the player automatically steps up, ~4 voxels.
 @export var step_height := 0.45
+## How fast the player moves while afloat, and how hard the water pushes back.
+@export var swim_speed := 2.6
+@export var swim_vertical := 3.2
+## Upward acceleration on a fully submerged body. Above gravity, so the player
+## rises until roughly the shoulders are out of the water and then floats.
+@export var buoyancy := 15.5
+@export var water_drag := 3.2
 @export var world_path: NodePath = ^"../VoxelWorld"
 
 @onready var _camera: Camera3D = $Head/Camera3D
 
 var _pitch := 0.0
 var _world: VoxelWorld
+## 0 = dry, 1 = fully under. Drives buoyancy, drag and how slowly you move.
+var _submersion := 0.0
 
 
 func _ready() -> void:
@@ -42,6 +51,13 @@ func _input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# How much of the 1.7 m capsule is under the sea surface.
+	_submersion = clampf((VoxelDefs.SEA_LEVEL - global_position.y) / 1.7, 0.0, 1.0)
+	# Chest deep is where the feet stop carrying the body. Standing on the sea
+	# bed counts too, otherwise the player would walk along the bottom of the
+	# bay instead of floating back up.
+	var swimming := _submersion > 0.4
+
 	var input := Vector2(
 		float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
 		float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W)))
@@ -53,12 +69,18 @@ func _physics_process(delta: float) -> void:
 		dir = dir.normalized()
 
 	var speed := sprint_speed if Input.is_physical_key_pressed(KEY_SHIFT) else walk_speed
+	# Wading slows you down long before you are actually swimming.
+	speed = lerpf(speed, swim_speed, _submersion)
 	var target := dir * speed
 	var a := accel_ground if is_on_floor() else accel_air
+	if _submersion > 0.0:
+		a = lerpf(a, 6.0, _submersion)
 	velocity.x = move_toward(velocity.x, target.x, a * speed * delta)
 	velocity.z = move_toward(velocity.z, target.z, a * speed * delta)
 
-	if is_on_floor():
+	if swimming:
+		_swim(delta)
+	elif is_on_floor():
 		if Input.is_physical_key_pressed(KEY_SPACE):
 			velocity.y = jump_velocity
 	else:
@@ -72,6 +94,26 @@ func _physics_process(delta: float) -> void:
 		_try_step_up(before, Vector3(velocity.x, 0.0, velocity.z) * delta)
 
 	_clamp_to_terrain()
+
+
+## Buoyancy plus drag. The upward push scales with how much of the body is
+## under water, so the player settles at the surface instead of bobbing, and
+## Space / Ctrl let you climb or dive from there.
+func _swim(delta: float) -> void:
+	velocity += get_gravity() * delta
+	velocity.y += buoyancy * _submersion * delta
+	if Input.is_physical_key_pressed(KEY_SPACE):
+		velocity.y += swim_vertical * delta * 4.0
+	if Input.is_physical_key_pressed(KEY_CTRL):
+		velocity.y -= swim_vertical * delta * 4.0
+	var damp: float = 1.0 - minf(water_drag * _submersion * delta, 0.9)
+	velocity *= damp
+	velocity.y = clampf(velocity.y, -swim_vertical, swim_vertical)
+
+
+## True while the head is under the surface, so the camera can be tinted.
+func is_underwater() -> bool:
+	return global_position.y + 1.6 < VoxelDefs.SEA_LEVEL
 
 
 ## Lets the capsule climb the small 10 cm terrain steps without stopping.
