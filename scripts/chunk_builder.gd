@@ -365,7 +365,10 @@ func _bands(h: int, nh: int, m: int) -> Array:
 func _put(x: int, y: int, z: int, mat: int) -> void:
 	if x < 0 or x >= CS or z < 0 or z >= CS or y < 0:
 		return
-	if y < _h(x, z) - 1:
+	# The column fills y = 0 .. h-1, so anything below h would sit inside the
+	# terrain. Keeping the topmost terrain voxel too would emit a second set of
+	# coplanar faces on top of the ground surface and make the two z-fight.
+	if y < _h(x, z):
 		return # buried inside the terrain
 	_extras[Vector3i(x, y, z)] = mat
 
