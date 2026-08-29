@@ -1,0 +1,16 @@
+default_language_version:
+  python: python3
+
+repos:
+  - repo: local
+    hooks:
+      - id: copyright-headers
+        name: copyright-headers
+        language: python
+        entry: python misc/workflow_scripts/copyright_headers.py
+        files: \.(gd)$
+      - id: uid-checks
+        name: uid-checks
+        language: python
+        entry: python misc/workflow_scripts/uid_checks.py
+        files: \.(tscn|import|tres|uid)$

@@ -8,9 +8,8 @@ extends DirectionalLight3D
 ## Atmosphere, which owns the Environment, so there is exactly one writer per
 ## property.
 
-## Seconds for a full 24 hour cycle. Deliberately short so the cycle can be
-## watched without waiting.
-@export var day_length: float = 60.0
+## Seconds for a full 24 hour cycle.
+@export var day_length: float = 300.0
 ## 0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset.
 @export_range(0.0, 1.0, 0.001) var start_time: float = 0.3
 @export var paused: bool = false
