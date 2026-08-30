@@ -1,19 +1,43 @@
 class_name VoxelWorld
 extends Node3D
 
-## Streams voxel chunks around the player on worker threads.
+## Streams voxel chunks around the player on worker threads, at several levels
+## of detail.
+##
+## Level 0 is the world at full 10 cm voxels in 6.4 m chunks. Every level above
+## it doubles the voxel size and so the ground one chunk covers, and is streamed
+## as a ring further out: 20 cm voxels, then 40, then 80. ChunkBuilder meshes
+## them all with the same code, so the distance is made of the same world at a
+## coarser grain - the same hills, the same trees, the same mushrooms - rather
+## than of something else that has to be faded in.
+##
+## Neighbouring rings overlap by `lod_band` metres and dither into one another
+## there; see voxel_common.gdshaderinc for how that is made seamless.
 
 signal world_ready
 
 @export var world_seed: int = 1337
-## Radius (in chunks) of loaded terrain. 1 chunk = 6.4 m.
-@export var view_distance: int = 7
-## Chunks within this radius also get grass tufts / pebbles.
-@export var detail_distance: int = 3
-## Chunks within this radius get a collision shape.
-@export var collision_distance: int = 3
+## How far (m) each level of detail reaches. Entry i is streamed with voxels of
+## 10 cm * 2^i, so the last entry decides where the chunks stop and the coarse
+## island mesh takes over.
+##
+## Each range should be double the one before it. That is what makes a voxel the
+## same size on screen at every level - and, because a ring then covers four
+## times the area with voxels four times as wide, what makes every ring cost
+## about the same as the one inside it. Ranges that grow faster than doubling
+## get expensive very quickly: the outermost ring is nearly all of the area.
+@export var lod_ranges: PackedFloat32Array = PackedFloat32Array([24.0, 48.0, 96.0, 192.0, 384.0])
+## How much of a level's reach is given over to handing on to the next one, as a
+## fraction of that reach. Both levels are drawn across the overlap, so it costs
+## geometry; a fraction rather than a fixed distance keeps the handover the same
+## size on screen wherever it happens.
+@export_range(0.05, 0.6, 0.01) var lod_band: float = 0.25
+## Chunks within this radius (m) also get grass tufts / pebbles. Level 0 only.
+@export_range(0.0, 100.0, 1.0) var detail_range: float = 19.2
+## Chunks within this radius (m) get a collision shape. Level 0 only.
+@export_range(0.0, 100.0, 1.0) var collision_range: float = 19.2
 @export var max_parallel_jobs: int = 6
-@export var chunks_per_frame: int = 2
+@export var chunks_per_frame: int = 4
 ## Global multiplier for the per-voxel colour variation.
 @export_range(0.0, 3.0, 0.05) var voxel_tint: float = 1.0
 ## Peak sway of a grass tuft in metres, and how fast the wind travels.
@@ -27,7 +51,7 @@ signal world_ready
 ## Multiplier on the light the mushroom caps cast on their surroundings.
 @export_range(0.0, 4.0, 0.05) var glow_light_energy: float = 1.0
 ## How far the cast light reaches before it has faded out completely. Must stay
-## inside detail_distance, since that is where the lights are created.
+## inside detail_range, since that is where the lights are created.
 @export_range(4.0, 40.0, 0.5) var glow_light_distance: float = 17.0
 ## Side length (m) of the sea plane that follows the player. Only has to reach
 ## past the point where the haze has closed in completely; past it the distant
@@ -44,8 +68,9 @@ signal world_ready
 @export_range(200.0, 2000.0, 10.0) var far_extent: float = 1300.0
 ## Size (m) of one cell of that mesh. Only the island is meshed this finely;
 ## open water is folded down to one quad per 8x8 cells, which is what pays for
-## it. Raise it for a cheaper build and a smaller mesh (XR).
-@export_range(1.0, 25.6, 0.1) var far_step: float = 2.0
+## it. Real voxels now reach a few hundred metres, so this only has to serve the
+## view from a summit and can be coarser than it once was.
+@export_range(1.0, 25.6, 0.1) var far_step: float = 3.0
 ## How far (m) the coarse mesh is sunk below the real surface, so that it can
 ## never poke through the streamed chunks in a hollow. Steep ground is sunk
 ## further; see FarTerrain.
@@ -54,9 +79,12 @@ signal world_ready
 
 var gen: TerrainGen
 
-var _material: ShaderMaterial
+## One static and one glowing-mushroom material per level of detail: each level
+## needs its own handover distances, and those live in the material.
+var _materials: Array[ShaderMaterial] = []
+var _glow_materials: Array[ShaderMaterial] = []
+## The wind swayed grass has no per level copy because tufts are level 0 only.
 var _grass_material: ShaderMaterial
-var _glow_material: ShaderMaterial
 var _water_material: ShaderMaterial
 var _far_material: ShaderMaterial
 var _far_canopy_material: ShaderMaterial
@@ -65,12 +93,15 @@ var _far: Node3D
 var _far_job: int = -1
 var _far_tiles: Array = []
 var _far_built := false
-var _chunks := {} # Vector2i -> Dictionary {node, detail, collision}
-var _jobs := {} # Vector2i -> task id
-var _queue: Array[Vector2i] = []
+## All keyed by Vector3i(chunk x, chunk z, level).
+var _chunks := {} # -> Dictionary {node, detail, collision}
+var _jobs := {} # -> task id
+var _queue: Array[Vector3i] = []
 var _done: Array = []
 var _mutex := Mutex.new()
-var _center := Vector2i(0x7fffffff, 0)
+## The chunk the player stands in, per level. A level is only requeued when its
+## own centre moves, so walking one 6.4 m chunk does not disturb the 51.2 m ring.
+var _centers: Array[Vector2i] = []
 var _spawned := false
 ## Every mushroom light currently in the scene, so the day/night cycle can dim
 ## them all at once.
@@ -92,20 +123,25 @@ func _ready() -> void:
 ## haze settings into them, is readied before this node.
 func haze_materials() -> Array[ShaderMaterial]:
 	_ensure_materials()
-	return [_material, _grass_material, _glow_material, _water_material,
+	var all: Array[ShaderMaterial] = [_grass_material, _water_material,
 		_far_material, _far_canopy_material]
+	all.append_array(_materials)
+	all.append_array(_glow_materials)
+	return all
 
 
-## The materials of the streamed chunks. These are the ones that dissolve into
-## the distant island at the edge of the loaded area.
+## The materials of the streamed chunks, every level of them.
 func chunk_materials() -> Array[ShaderMaterial]:
 	_ensure_materials()
-	return [_material, _grass_material, _glow_material]
+	var all: Array[ShaderMaterial] = [_grass_material]
+	all.append_array(_materials)
+	all.append_array(_glow_materials)
+	return all
 
 
 ## The two materials of the distant island: the ground and the canopy shell
 ## over its woods. Atmosphere hands the canopy the band it has to fade in over,
-## which is the same one the chunks dissolve across.
+## which is the same one the outermost chunk level fades out across.
 func far_materials() -> Array[ShaderMaterial]:
 	_ensure_materials()
 	return [_far_material, _far_canopy_material]
@@ -116,11 +152,12 @@ func far_canopy_material() -> ShaderMaterial:
 	return _far_canopy_material
 
 
-## Where the eye is, for the canopy handover. A uniform rather than the camera
-## position the shader already has, so that the shadow pass drops the same
-## crowns the colour pass does.
-func set_far_eye(pos: Vector3) -> void:
-	for m in far_materials():
+## Where the eye is, for every handover in the world. A uniform rather than the
+## camera position the shader already has, so that the shadow pass drops exactly
+## the voxels the colour pass does instead of casting shadows for geometry that
+## was never drawn.
+func set_eye(pos: Vector3) -> void:
+	for m in haze_materials():
 		m.set_shader_parameter("eye_pos", pos)
 
 
@@ -131,11 +168,34 @@ func set_far_visible(on: bool) -> void:
 		_far.visible = on
 
 
-## The material the glowing mushroom caps are drawn with. Atmosphere drives its
-## glow level from the time of day.
-func glow_material() -> ShaderMaterial:
-	_ensure_materials()
-	return _glow_material
+## How many levels of detail are streamed.
+func lod_count() -> int:
+	return maxi(lod_ranges.size(), 1)
+
+
+## Side length (m) of one chunk of a level. Always CS columns across, so the
+## coarser the voxels the more ground a chunk covers.
+func chunk_meters(lod: int) -> float:
+	return VoxelDefs.CHUNK_METERS * float(1 << lod)
+
+
+## Where a level starts and stops being drawn. A level reaches inwards past the
+## end of the one below it by `lod_band`, and the two dither into one another
+## across that overlap.
+func lod_inner(lod: int) -> float:
+	return 0.0 if lod <= 0 else lod_outer(lod - 1) * (1.0 - lod_band)
+
+
+func lod_outer(lod: int) -> float:
+	return lod_ranges[clampi(lod, 0, lod_ranges.size() - 1)]
+
+
+## Size (m) of the hash cell the handover between level `lod` and the next one
+## up is dithered with. Both sides of a band have to use the same value or their
+## holes stop lining up; it grows with the level so that a band always looks
+## about the same size on screen, however far away it is.
+func lod_cell(lod: int) -> float:
+	return VoxelDefs.VOXEL_SIZE * float(1 << lod) * 4.0
 
 
 ## The sea's material. Atmosphere hazes it over a longer range than the rest.
@@ -148,31 +208,43 @@ func sea_material() -> ShaderMaterial:
 ## cap shader and the light the caps cast on their surroundings.
 func set_glow_level(amount: float) -> void:
 	_glow_level = amount
-	glow_material().set_shader_parameter("glow_amount", amount)
+	for m in _glow_materials:
+		m.set_shader_parameter("glow_amount", amount)
 
 
 func _ensure_materials() -> void:
-	if _material != null:
+	if not _materials.is_empty():
 		return
-	_material = ShaderMaterial.new()
-	_material.shader = load("res://shaders/voxel.gdshader")
-	_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
-	_material.set_shader_parameter("tint_scale", voxel_tint)
+	var voxel_shader := load("res://shaders/voxel.gdshader")
+	var glow_shader := load("res://shaders/voxel_glow.gdshader")
+	var lin := glow_color.srgb_to_linear()
+	for lod in lod_count():
+		# `voxel_size` is what the per voxel brightness variation is keyed to, so
+		# it has to be this level's voxel and not the finest one, or a coarse
+		# chunk would be speckled at a scale its geometry does not have.
+		var vs := VoxelDefs.VOXEL_SIZE * float(1 << lod)
+		var m := ShaderMaterial.new()
+		m.shader = voxel_shader
+		m.set_shader_parameter("voxel_size", vs)
+		m.set_shader_parameter("tint_scale", voxel_tint)
+		_materials.append(m)
+
+		var g := ShaderMaterial.new()
+		g.shader = glow_shader
+		g.set_shader_parameter("voxel_size", vs)
+		g.set_shader_parameter("tint_scale", voxel_tint)
+		g.set_shader_parameter("glow_color", Vector3(lin.r, lin.g, lin.b))
+		g.set_shader_parameter("glow_strength", glow_strength)
+		g.set_shader_parameter("pulse_speed", glow_pulse_speed)
+		g.set_shader_parameter("pulse_depth", glow_pulse_depth)
+		_glow_materials.append(g)
+
 	_grass_material = ShaderMaterial.new()
 	_grass_material.shader = load("res://shaders/voxel_grass.gdshader")
 	_grass_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
 	_grass_material.set_shader_parameter("tint_scale", voxel_tint)
 	_grass_material.set_shader_parameter("wind_strength", wind_strength)
 	_grass_material.set_shader_parameter("wind_speed", wind_speed)
-	_glow_material = ShaderMaterial.new()
-	_glow_material.shader = load("res://shaders/voxel_glow.gdshader")
-	_glow_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
-	_glow_material.set_shader_parameter("tint_scale", voxel_tint)
-	var lin := glow_color.srgb_to_linear()
-	_glow_material.set_shader_parameter("glow_color", Vector3(lin.r, lin.g, lin.b))
-	_glow_material.set_shader_parameter("glow_strength", glow_strength)
-	_glow_material.set_shader_parameter("pulse_speed", glow_pulse_speed)
-	_glow_material.set_shader_parameter("pulse_depth", glow_pulse_depth)
 	_water_material = ShaderMaterial.new()
 	_water_material.shader = load("res://shaders/water.gdshader")
 	var far_shader := load("res://shaders/far_terrain.gdshader")
@@ -181,6 +253,48 @@ func _ensure_materials() -> void:
 	_far_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
 	_far_canopy_material = ShaderMaterial.new()
 	_far_canopy_material.shader = far_shader
+	_push_lod_bands()
+
+
+## Hands every level the two bands it shares with its neighbours: the one it
+## fades in across (where it is the coarser of the pair) and the one it fades
+## out across (where it is the finer). The values of a band are pushed to both
+## of the levels that meet in it, which is what lets their dither interlock -
+## see voxel_common.gdshaderinc.
+##
+## Level 0 never fades in: it is solid from the eye outwards. The last level
+## fades out into the coarse island mesh, which is opaque behind it and so needs
+## no complementary half.
+func _push_lod_bands() -> void:
+	var last := lod_count() - 1
+	for lod in lod_count():
+		var out_begin := lod_outer(lod) * (1.0 - lod_band)
+		var out_end := lod_outer(lod)
+		var out_cell := lod_cell(lod)
+		var in_begin := -1.0
+		var in_end := -1.0
+		var in_cell := 0.4
+		if lod > 0:
+			in_begin = lod_inner(lod)
+			in_end = lod_outer(lod - 1)
+			in_cell = lod_cell(lod - 1)
+		for m in [_materials[lod], _glow_materials[lod]] as Array[ShaderMaterial]:
+			m.set_shader_parameter("fade_in_begin", in_begin)
+			m.set_shader_parameter("fade_in_end", in_end)
+			m.set_shader_parameter("fade_in_cell", in_cell)
+			m.set_shader_parameter("fade_out_begin", out_begin)
+			m.set_shader_parameter("fade_out_end", out_end)
+			m.set_shader_parameter("fade_out_cell", out_cell)
+		if lod == 0:
+			# Grass tufts live only here, and go with this level.
+			_grass_material.set_shader_parameter("fade_out_begin", out_begin)
+			_grass_material.set_shader_parameter("fade_out_end", out_end)
+			_grass_material.set_shader_parameter("fade_out_cell", out_cell)
+
+	# The canopy of the distant island comes in exactly as the outermost level
+	# of real trees goes, so the woods are never handed over to nobody.
+	_far_canopy_material.set_shader_parameter("canopy_begin", lod_outer(last) * (1.0 - lod_band))
+	_far_canopy_material.set_shader_parameter("canopy_end", lod_outer(last))
 	_far_canopy_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
 
 
@@ -315,10 +429,10 @@ func _update_lights(delta: float) -> void:
 	var p := get_node_or_null(player_path)
 	if p != null:
 		eye = (p as Node3D).global_position
-	# A chunk only gains lights once it comes within detail_distance, so without
-	# a fade a whole grove would light up the instant it crossed that line.
-	# Fade over the last chunk before the boundary and the switch is invisible.
-	var far: float = minf(glow_light_distance, float(detail_distance) * VoxelDefs.CHUNK_METERS)
+	# A chunk only gains lights once it comes within detail_range, so without a
+	# fade a whole grove would light up the instant it crossed that line. Fade
+	# over the last stretch before the boundary and the switch is invisible.
+	var far: float = minf(glow_light_distance, detail_range)
 	var near := far * 0.55
 	var alive: Array[OmniLight3D] = []
 	for l in _mushroom_lights:
@@ -334,65 +448,110 @@ func _update_lights(delta: float) -> void:
 	_mushroom_lights = alive
 
 
-func player_chunk() -> Vector2i:
-	var p := get_node_or_null(player_path)
-	var pos := Vector3.ZERO if p == null else (p as Node3D).global_position
-	return Vector2i(
-		int(floor(pos.x / VoxelDefs.CHUNK_METERS)),
-		int(floor(pos.z / VoxelDefs.CHUNK_METERS)))
-
-
+## A level is requeued only when the player crosses one of *its* chunks, so
+## walking a few metres does not disturb the 51.2 m ring on the horizon.
 func _update_center(force: bool) -> void:
-	var c := player_chunk()
-	if not force and c == _center:
+	var p := _eye_xz()
+	var changed := force
+	for lod in lod_count():
+		var m := chunk_meters(lod)
+		var c := Vector2i(int(floor(p.x / m)), int(floor(p.y / m)))
+		if lod >= _centers.size():
+			_centers.append(c)
+			changed = true
+		elif _centers[lod] != c:
+			_centers[lod] = c
+			changed = true
+	if not changed:
 		return
-	_center = c
 	_rebuild_queue()
 	_unload_far()
 
 
+func _eye_xz() -> Vector2:
+	var p := get_node_or_null(player_path)
+	if p == null:
+		return Vector2.ZERO
+	var pos := (p as Node3D).global_position
+	return Vector2(pos.x, pos.z)
+
+
+## How far a chunk is from the player: x is the distance to its nearest point,
+## y the distance to its farthest corner. A chunk is worth having when some part
+## of it falls inside its level's ring, which is what those two answer.
+func _chunk_gap(key: Vector3i, p: Vector2) -> Vector2:
+	var m := chunk_meters(key.z)
+	var x0 := float(key.x) * m
+	var z0 := float(key.y) * m
+	var dx := maxf(maxf(x0 - p.x, p.x - (x0 + m)), 0.0)
+	var dz := maxf(maxf(z0 - p.y, p.y - (z0 + m)), 0.0)
+	var fx := maxf(absf(p.x - x0), absf(p.x - (x0 + m)))
+	var fz := maxf(absf(p.y - z0), absf(p.y - (z0 + m)))
+	return Vector2(sqrt(dx * dx + dz * dz), sqrt(fx * fx + fz * fz))
+
+
 func _rebuild_queue() -> void:
-	var wanted: Array[Vector2i] = []
-	for dz in range(-view_distance, view_distance + 1):
-		for dx in range(-view_distance, view_distance + 1):
-			if dx * dx + dz * dz > view_distance * view_distance:
-				continue
-			var c := _center + Vector2i(dx, dz)
-			if _jobs.has(c):
-				continue
-			if _chunks.has(c):
-				# upgrade a chunk that came into the detail / collision radius
-				var info: Dictionary = _chunks[c]
-				var d := _chebyshev(c)
-				var need_detail := d <= detail_distance
-				var need_col := d <= collision_distance
-				if (need_detail and not info["detail"]) or (need_col and not info["collision"]):
-					wanted.append(c)
-				continue
-			wanted.append(c)
-	wanted.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-		return (a - _center).length_squared() < (b - _center).length_squared())
+	var p := _eye_xz()
+	var wanted: Array[Vector3i] = []
+	for lod in lod_count():
+		var m := chunk_meters(lod)
+		var outer := lod_outer(lod)
+		var inner := lod_inner(lod)
+		var cx0 := int(floor((p.x - outer) / m))
+		var cx1 := int(floor((p.x + outer) / m))
+		var cz0 := int(floor((p.y - outer) / m))
+		var cz1 := int(floor((p.y + outer) / m))
+		for cz in range(cz0, cz1 + 1):
+			for cx in range(cx0, cx1 + 1):
+				var key := Vector3i(cx, cz, lod)
+				var gap := _chunk_gap(key, p)
+				# Outside the ring entirely, or wholly inside the finer level
+				# that covers this ground already.
+				if gap.x > outer or gap.y < inner:
+					continue
+				if _jobs.has(key):
+					continue
+				if _chunks.has(key):
+					# upgrade a chunk that came into the detail / collision range
+					var info: Dictionary = _chunks[key]
+					if (_wants_detail(key, gap.x) and not info["detail"]) 							or (_wants_collision(key, gap.x) and not info["collision"]):
+						wanted.append(key)
+					continue
+				wanted.append(key)
+	# Finest level first, and nearest first inside a level, so the ground the
+	# player is standing on is there before the horizon is.
+	wanted.sort_custom(func(a: Vector3i, b: Vector3i) -> bool:
+		if a.z != b.z:
+			return a.z < b.z
+		return _chunk_gap(a, p).x < _chunk_gap(b, p).x)
 	_queue = wanted
 
 
-func _chebyshev(c: Vector2i) -> int:
-	return maxi(absi(c.x - _center.x), absi(c.y - _center.y))
+## Grass tufts, collision and mushroom lights are all level 0 only: nothing
+## coarser is ever close enough to walk on or to look at from underneath.
+func _wants_detail(key: Vector3i, near: float) -> bool:
+	return key.z == 0 and near <= detail_range
+
+
+func _wants_collision(key: Vector3i, near: float) -> bool:
+	return key.z == 0 and near <= collision_range
 
 
 func _pump_jobs() -> void:
+	var p := _eye_xz()
 	while _jobs.size() < max_parallel_jobs and not _queue.is_empty():
-		var c: Vector2i = _queue.pop_front()
-		if _jobs.has(c):
+		var key: Vector3i = _queue.pop_front()
+		if _jobs.has(key):
 			continue
-		var d := _chebyshev(c)
-		var detail := d <= detail_distance
-		var coll := d <= collision_distance
-		var id := WorkerThreadPool.add_task(_job.bind(c, detail, coll), false, "voxel_chunk")
-		_jobs[c] = id
+		var near := _chunk_gap(key, p).x
+		var detail := _wants_detail(key, near)
+		var coll := _wants_collision(key, near)
+		var id := WorkerThreadPool.add_task(_job.bind(key, detail, coll), false, "voxel_chunk")
+		_jobs[key] = id
 
 
-func _job(c: Vector2i, detail: bool, coll: bool) -> void:
-	var res := ChunkBuilder.build(gen, c.x, c.y, detail, coll)
+func _job(key: Vector3i, detail: bool, coll: bool) -> void:
+	var res := ChunkBuilder.build(gen, key.x, key.y, key.z, detail, coll)
 	res["detail"] = detail
 	res["collision"] = coll
 	_mutex.lock()
@@ -408,30 +567,32 @@ func _integrate_results() -> void:
 		batch.append(_done.pop_front())
 	_mutex.unlock()
 
+	var p := _eye_xz()
 	for res in batch:
-		var c := Vector2i(res["cx"], res["cz"])
-		if _jobs.has(c):
-			WorkerThreadPool.wait_for_task_completion(_jobs[c])
-			_jobs.erase(c)
-		if _chunks.has(c):
-			var old: Dictionary = _chunks[c]
+		var key := Vector3i(res["cx"], res["cz"], res["lod"])
+		if _jobs.has(key):
+			WorkerThreadPool.wait_for_task_completion(_jobs[key])
+			_jobs.erase(key)
+		if _chunks.has(key):
+			var old: Dictionary = _chunks[key]
 			if is_instance_valid(old["node"]):
 				old["node"].queue_free()
-			_chunks.erase(c)
-		if _chebyshev(c) > view_distance:
+			_chunks.erase(key)
+		if _chunk_gap(key, p).x > lod_outer(key.z):
 			continue
-		var node := _spawn_chunk(c, res)
-		_chunks[c] = {"node": node, "detail": res["detail"], "collision": res["collision"]}
+		var node := _spawn_chunk(key, res)
+		_chunks[key] = {"node": node, "detail": res["detail"], "collision": res["collision"]}
 
 	if not _spawned and _jobs.is_empty() and _queue.is_empty():
 		_spawned = true
 		world_ready.emit()
 
 
-func _spawn_chunk(c: Vector2i, res: Dictionary) -> Node3D:
+func _spawn_chunk(key: Vector3i, res: Dictionary) -> Node3D:
+	var m := chunk_meters(key.z)
 	var root := Node3D.new()
-	root.name = "Chunk_%d_%d" % [c.x, c.y]
-	root.position = Vector3(c.x * VoxelDefs.CHUNK_METERS, 0.0, c.y * VoxelDefs.CHUNK_METERS)
+	root.name = "Chunk_%d_%d_L%d" % [key.x, key.y, key.z]
+	root.position = Vector3(float(key.x) * m, 0.0, float(key.y) * m)
 	add_child(root)
 	if res["mesh"] != null:
 		var mi := MeshInstance3D.new()
@@ -440,12 +601,12 @@ func _spawn_chunk(c: Vector2i, res: Dictionary) -> Node3D:
 		var sway_surface: int = res.get("sway_surface", -1)
 		var glow_surface: int = res.get("glow_surface", -1)
 		for s in mesh.get_surface_count():
-			var m := _material
+			var mat := _materials[key.z]
 			if s == sway_surface:
-				m = _grass_material
+				mat = _grass_material
 			elif s == glow_surface:
-				m = _glow_material
-			mi.set_surface_override_material(s, m)
+				mat = _glow_materials[key.z]
+			mi.set_surface_override_material(s, mat)
 		if sway_surface >= 0:
 			# the wind pushes grass a few centimetres outside the baked AABB
 			mi.extra_cull_margin = 0.25
@@ -474,16 +635,22 @@ func _spawn_chunk(c: Vector2i, res: Dictionary) -> Node3D:
 	return root
 
 
+## Drops chunks that have fallen out of their level's ring, with one chunk of
+## slack either side so that walking back and forth over a boundary does not
+## rebuild the same chunk again and again.
 func _unload_far() -> void:
-	var drop: Array[Vector2i] = []
-	for c in _chunks.keys():
-		if _chebyshev(c) > view_distance + 1:
-			drop.append(c)
-	for c in drop:
-		var info: Dictionary = _chunks[c]
+	var p := _eye_xz()
+	var drop: Array[Vector3i] = []
+	for key in _chunks.keys():
+		var slack := chunk_meters(key.z)
+		var gap := _chunk_gap(key, p)
+		if gap.x > lod_outer(key.z) + slack or gap.y < lod_inner(key.z) - slack:
+			drop.append(key)
+	for key in drop:
+		var info: Dictionary = _chunks[key]
 		if is_instance_valid(info["node"]):
 			info["node"].queue_free()
-		_chunks.erase(c)
+		_chunks.erase(key)
 
 
 func biome_name_at(pos: Vector3) -> String:

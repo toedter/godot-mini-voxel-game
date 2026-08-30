@@ -49,28 +49,63 @@ uniform float mist_top = 44.0;
 uniform float mist_depth = 24.0;
 uniform float mist_floor : hint_range(0.02, 1.0) = 0.10;
 
-// Handover to the distant island.
+// Handover between levels of detail.
 //
-// Streamed chunks stop at a hard circle around the player. Rather than letting
-// that circle show, the chunk geometry is thinned out stochastically over the
-// last few metres before it: holes open up in it and grow until nothing is
-// left, and the coarse mesh of the whole island, which sits just below the
-// streamed surface, takes over. Left at their defaults nothing is ever
-// dropped, so the distant mesh alone decides whether the handover happens.
-uniform float dissolve_begin = 1e8;
-uniform float dissolve_end = 1e9;
+// Chunks are streamed at several voxel sizes: 10 cm close to the player, then
+// 20, 40, 80 cm further out, and finally the coarse mesh of the whole island.
+// Where two levels meet they are both drawn across a band and dither into one
+// another.
+//
+// The trick that makes the switch hard to catch is that the two sides are
+// exactly complementary. Both work out the same `t` from the same distance and
+// hash the same world cell, and then the finer level drops precisely the cells
+// the coarser one keeps. So no sky is ever visible through the band: every hole
+// one level opens is already filled by the other level's voxels, and what you
+// see is one resolution handing over to another rather than a rim of holes.
+//
+// Distance is measured from `eye_pos` rather than from the fragment's view
+// space depth, so the shadow pass, which renders from the light, drops the same
+// voxels as the colour pass instead of casting the shadows of geometry that was
+// never drawn.
+uniform vec3 eye_pos = vec3(0.0);
 
-// True when this fragment belongs to the part of the chunk that has already
-// been handed over. The pattern is keyed to the world grid, so the holes stay
-// put instead of crawling over the ground as the player moves.
-bool dissolve_away(vec3 world, float dist) {
-	float t = smoothstep(dissolve_begin, dissolve_end, dist);
-	if (t <= 0.0) {
-		return false;
+// The band this level fades IN over, where it is the coarser of the pair, and
+// the band it fades OUT over, where it is the finer one. `cell` is the size of
+// the hash cell and has to match on both sides of a band. A band with
+// end <= begin is switched off, which is what the innermost level wants below
+// and the outermost above.
+uniform float fade_in_begin = -1.0;
+uniform float fade_in_end = -1.0;
+uniform float fade_in_cell = 0.4;
+uniform float fade_out_begin = -1.0;
+uniform float fade_out_end = -1.0;
+uniform float fade_out_cell = 0.4;
+
+// True when this fragment belongs to a cell that a neighbouring level is
+// drawing instead.
+bool lod_hidden(vec3 world) {
+	float d = distance(world, eye_pos);
+	if (fade_out_end > fade_out_begin) {
+		float t = smoothstep(fade_out_begin, fade_out_end, d);
+		if (t >= 1.0) {
+			return true;
+		}
+		// The finer side gives up the cells the coarser one has taken over.
+		if (t > 0.0 && hash13(floor(world / max(fade_out_cell, 0.001))) < t) {
+			return true;
+		}
 	}
-	// Cells a few voxels across: big enough to stay stable under motion,
-	// small enough to read as a fade rather than as chunks going missing.
-	return hash13(floor(world / max(voxel_size * 4.0, 0.001))) < t;
+	if (fade_in_end > fade_in_begin) {
+		float t = smoothstep(fade_in_begin, fade_in_end, d);
+		if (t <= 0.0) {
+			return true;
+		}
+		// The coarser side takes only the cells the finer one has given up.
+		if (t < 1.0 && hash13(floor(world / max(fade_in_cell, 0.001))) >= t) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // Same gradient as the ProceduralSkyMaterial of the WorldEnvironment.

@@ -19,9 +19,10 @@ extends Node3D
 ## checking the rig on a desktop, where nothing drives the camera.
 @export var force_rig: bool = false
 
-## Streaming radius while in XR. Stereo rendering costs roughly twice as much
-## as the flat view, so we pull the horizon in to hold the headset's framerate.
-@export var xr_view_distance: int = 5
+## How far each level of detail reaches while in XR. Stereo rendering costs
+## roughly twice as much as the flat view, so every ring is pulled in to hold
+## the headset's framerate.
+@export var xr_lod_ranges: PackedFloat32Array = PackedFloat32Array([20.0, 40.0, 80.0, 160.0, 320.0])
 ## SSAO is a full screen effect and gets rendered per eye; off by default in XR.
 @export var xr_disable_ssao: bool = true
 ## Cell size (m) of the distant island mesh in XR. Four metres is a quarter of
@@ -108,8 +109,8 @@ func _retarget_dependents() -> void:
 
 func _tune_for_xr() -> void:
 	var world := get_node_or_null(world_path)
-	if world != null and "view_distance" in world:
-		world.view_distance = xr_view_distance
+	if world != null and "lod_ranges" in world:
+		world.lod_ranges = xr_lod_ranges
 		# Runs before VoxelWorld is ready, so the distant island is built at
 		# the XR resolution rather than built twice.
 		world.far_step = xr_far_step

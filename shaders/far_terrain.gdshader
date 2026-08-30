@@ -25,13 +25,11 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx, fog_disabled;
 // that follows the player.
 uniform float reflect_max : hint_range(0.0, 1.0) = 0.72;
 
-// Where the canopy shell hands back over to the real trees. Measured from
-// `eye_pos` rather than from VERTEX so that the shadow pass, which renders from
-// the light, drops exactly the same fragments as the colour pass; taking the
-// distance from the camera would otherwise leave the shadows of crowns that are
-// not drawn. Left at their defaults nothing is ever dropped, which is what the
+// Where the canopy shell hands back over to the real trees of the streamed
+// chunks. Measured from voxel_common's `eye_pos`, for the same reason the level
+// handover is: the shadow pass has to drop the same crowns the colour pass
+// does. Left at their defaults nothing is ever dropped, which is what the
 // ground surface wants.
-uniform vec3 eye_pos = vec3(0.0);
 uniform float canopy_begin = -1.0;
 uniform float canopy_end = -1.0;
 

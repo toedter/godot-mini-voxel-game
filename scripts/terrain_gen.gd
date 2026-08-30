@@ -299,6 +299,13 @@ func height_meters(mx: float, mz: float) -> float:
 	return maxf(profile + relief * lerpf(0.28, 1.0, land) + mnt.x * land, MIN_HEIGHT)
 
 
+## Height of a column counted in voxels of `vs` metres. The coarser levels of
+## detail mesh the same world on a bigger grid, so they quantise the same height
+## field with their own voxel size.
+func height_voxels(mx: float, mz: float, vs: float) -> int:
+	return int(floor(height_meters(mx, mz) / vs))
+
+
 ## Height of a column in voxels (the column occupies y = 0 .. h-1).
 func height_at(wx: int, wz: int) -> int:
 	return int(floor(height_meters(float(wx) * VS, float(wz) * VS) / VS))

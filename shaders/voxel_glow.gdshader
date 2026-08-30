@@ -30,7 +30,7 @@ void vertex() {
 }
 
 void fragment() {
-	if (dissolve_away(v_world, length(VERTEX))) {
+	if (lod_hidden(v_world)) {
 		discard;
 	}
 	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX, v_world.y);

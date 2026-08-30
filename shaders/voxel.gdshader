@@ -11,7 +11,7 @@ void vertex() {
 }
 
 void fragment() {
-	if (dissolve_away(v_world, length(VERTEX))) {
+	if (lod_hidden(v_world)) {
 		discard;
 	}
 	// Scaling the albedo down and adding the haze as emission means the haze is

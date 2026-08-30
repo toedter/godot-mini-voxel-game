@@ -14,14 +14,27 @@ extends RefCounted
 ## night.
 
 const CS := VoxelDefs.CHUNK_SIZE
-const VS := VoxelDefs.VOXEL_SIZE
+## Edge length (m) of a voxel at the finest level. Feature dimensions and the
+## coordinates the terrain generator hands out are all counted in these.
+const FINE_VS := VoxelDefs.VOXEL_SIZE
 const MS := CS + 2 # stride of the heightmap incl. a 1 column margin
 
 var _gen: TerrainGen
 var _cx: int
 var _cz: int
-var _ox: int # origin in world voxel coordinates
+var _ox: int # origin in this level's voxel coordinates
 var _oz: int
+## Level of detail. `_k` is how many fine voxels go into one voxel of this
+## chunk (1, 2, 4, 8 ...) and `_vs` is the edge length that gives them. A chunk
+## is always CS columns across, so a coarse chunk simply covers more ground:
+## 6.4 m at _k = 1, 51.2 m at _k = 8.
+##
+## Nothing else in here knows about levels. The mesher counts in voxels and only
+## multiplies by `_vs` when it emits a vertex, so the same code produces the same
+## world at every resolution - the same trees and mushrooms, just chunkier.
+var _lod: int = 0
+var _k: int = 1
+var _vs: float = VoxelDefs.VOXEL_SIZE
 
 var _heights := PackedInt32Array()
 var _mats := PackedByteArray()
@@ -65,11 +78,17 @@ var _want_detail := false
 var _want_collision := true
 
 
-static func build(gen: TerrainGen, cx: int, cz: int, want_detail: bool, want_collision: bool) -> Dictionary:
+## `lod` is the level of detail: 0 is full 10 cm voxels, each step up doubles
+## the voxel size and so the ground one chunk covers.
+static func build(gen: TerrainGen, cx: int, cz: int, lod: int,
+		want_detail: bool, want_collision: bool) -> Dictionary:
 	var b := ChunkBuilder.new()
 	b._gen = gen
 	b._cx = cx
 	b._cz = cz
+	b._lod = lod
+	b._k = 1 << lod
+	b._vs = FINE_VS * float(b._k)
 	b._ox = cx * CS
 	b._oz = cz * CS
 	b._want_detail = want_detail
@@ -84,7 +103,7 @@ func _run() -> Dictionary:
 	_mesh_terrain_sides()
 	_mesh_features()
 
-	var result := {"cx": _cx, "cz": _cz, "mesh": null, "shape": null, "lights": _lights}
+	var result := {"cx": _cx, "cz": _cz, "lod": _lod, "mesh": null, "shape": null, "lights": _lights}
 	var mesh: ArrayMesh = null
 	if not _verts.is_empty():
 		var arrays := []
@@ -138,9 +157,9 @@ func _sample_columns() -> void:
 	for lz in range(-1, CS + 1):
 		for lx in range(-1, CS + 1):
 			var i := (lz + 1) * MS + (lx + 1)
-			var mx := float(_ox + lx) * VS
-			var mz := float(_oz + lz) * VS
-			_heights[i] = int(floor(_gen.height_meters(mx, mz) / VS))
+			var mx := float(_ox + lx) * _vs
+			var mz := float(_oz + lz) * _vs
+			_heights[i] = int(floor(_gen.height_meters(mx, mz) / _vs))
 
 	for lz in range(-1, CS + 1):
 		for lx in range(-1, CS + 1):
@@ -151,9 +170,9 @@ func _sample_columns() -> void:
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx + 1, lz)]))
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz - 1)]))
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz + 1)]))
-			var mx := float(_ox + lx) * VS
-			var mz := float(_oz + lz) * VS
-			_mats[i] = _gen.surface_material(mx, mz, float(h) * VS, slope)
+			var mx := float(_ox + lx) * _vs
+			var mz := float(_oz + lz) * _vs
+			_mats[i] = _gen.surface_material(mx, mz, float(h) * _vs, slope)
 
 
 func _clamp_idx(lx: int, lz: int) -> int:
@@ -269,11 +288,11 @@ func _mesh_terrain_top() -> void:
 				for dx in w:
 					used[(z + dz) * CS + x + dx] = 1
 
-			var y := float(h) * VS
-			var x0 := float(x) * VS
-			var x1 := float(x + w) * VS
-			var z0 := float(z) * VS
-			var z1 := float(z + d) * VS
+			var y := float(h) * _vs
+			var x0 := float(x) * _vs
+			var x1 := float(x + w) * _vs
+			var z0 := float(z) * _vs
+			var z1 := float(z + d) * _vs
 			_quad(
 				Vector3(x0, y, z0), Vector3(x0, y, z1), Vector3(x1, y, z1), Vector3(x1, y, z0),
 				Vector3.UP, VoxelDefs.color_of(m), true)
@@ -294,9 +313,9 @@ func _mesh_terrain_sides() -> void:
 				var run := 1
 				while z + run < CS and _h(x, z + run) == h and _h(x + dir, z + run) == nh and _m(x, z + run) == m:
 					run += 1
-				var px := float(x + (1 if dir > 0 else 0)) * VS
-				var z0 := float(z) * VS
-				var z1 := float(z + run) * VS
+				var px := float(x + (1 if dir > 0 else 0)) * _vs
+				var z0 := float(z) * _vs
+				var z1 := float(z + run) * _vs
 				for band in _bands(h, nh, m):
 					var y0: float = band[0]
 					var y1: float = band[1]
@@ -323,9 +342,9 @@ func _mesh_terrain_sides() -> void:
 				var run := 1
 				while x + run < CS and _h(x + run, z) == h and _h(x + run, z + dir) == nh and _m(x + run, z) == m:
 					run += 1
-				var pz := float(z + (1 if dir > 0 else 0)) * VS
-				var x0 := float(x) * VS
-				var x1 := float(x + run) * VS
+				var pz := float(z + (1 if dir > 0 else 0)) * _vs
+				var x0 := float(x) * _vs
+				var x1 := float(x + run) * _vs
 				for band in _bands(h, nh, m):
 					var y0: float = band[0]
 					var y1: float = band[1]
@@ -345,15 +364,46 @@ func _bands(h: int, nh: int, m: int) -> Array:
 	var out := []
 	var top_col := VoxelDefs.color_of(m)
 	var sub_mat: int = VoxelDefs.SUBSURFACE.get(m, VoxelDefs.DIRT)
-	out.append([float(h - 1) * VS, float(h) * VS, top_col])
+	out.append([float(h - 1) * _vs, float(h) * _vs, top_col])
 	if h - 1 > nh:
-		out.append([float(nh) * VS, float(h - 1) * VS, VoxelDefs.color_of(sub_mat)])
+		out.append([float(nh) * _vs, float(h - 1) * _vs, VoxelDefs.color_of(sub_mat)])
 	return out
 
 
 # --------------------------------------------------------------------------
 # features
 # --------------------------------------------------------------------------
+
+## Scales a size given in fine voxels into this chunk's grid. Never rounds a
+## solid part away completely: a trunk that is three fine voxels thick is one
+## coarse voxel thick, not nothing.
+func _s(n: int) -> int:
+	return maxi(int(round(float(n) / float(_k))), 1)
+
+
+## The same for an offset, which is allowed to collapse to zero.
+func _sv(n: int) -> int:
+	return int(round(float(n) / float(_k)))
+
+
+## Scales a radius. What has to survive is the width the radius stands for,
+## `2 * n + 1` voxels, so that is what gets rounded; the result is halved back
+## into a radius afterwards.
+##
+## Radii cannot go through `_s`. Rounding one on its own and then holding it at
+## a minimum of one leaves a tree trunk three voxels wide at every level, so at
+## 1.6 m voxels the trunk ends up as wide as the crown and a distant wood turns
+## brown. Rounding the width instead lets a thin part shrink to a single voxel
+## while a fat one keeps its proportions.
+func _r(n: int) -> int:
+	return maxi(int(round(float(2 * n + 1) / float(_k))), 1) / 2
+
+
+## A fine world voxel coordinate, as `TerrainGen.feature_in_cell` hands them
+## out, in this chunk's own grid.
+func _to_local(fine: int, origin: int) -> int:
+	return int(floor(float(fine) * FINE_VS / _vs)) - origin
+
 
 func _put(x: int, y: int, z: int, mat: int) -> void:
 	if x < 0 or x >= CS or z < 0 or z >= CS or y < 0:
@@ -366,15 +416,19 @@ func _put(x: int, y: int, z: int, mat: int) -> void:
 	_extras[Vector3i(x, y, z)] = mat
 
 
+## Features are planted on a fixed 6.4 m grid, which is one chunk at level 0 but
+## `_k` chunks across at level `_k`, so the scan covers as many feature cells as
+## this chunk spans plus one either side for the parts that hang over the edge.
 func _place_features() -> void:
-	for fcz in range(_cz - 1, _cz + 2):
-		for fcx in range(_cx - 1, _cx + 2):
+	for fcz in range(_cz * _k - 1, (_cz + 1) * _k + 1):
+		for fcx in range(_cx * _k - 1, (_cx + 1) * _k + 1):
 			var f := _gen.feature_in_cell(fcx, fcz)
 			if f.is_empty():
 				continue
-			var lx: int = int(f["x"]) - _ox
-			var lz: int = int(f["z"]) - _oz
-			var base_y := _gen.height_at(int(f["x"]), int(f["z"]))
+			var lx: int = _to_local(int(f["x"]), _ox)
+			var lz: int = _to_local(int(f["z"]), _oz)
+			var base_y := _gen.height_voxels(
+				float(f["x"]) * FINE_VS, float(f["z"]) * FINE_VS, _vs)
 			var rng := RandomNumberGenerator.new()
 			rng.seed = TerrainGen.hash2i(fcx, fcz, _gen.world_seed)
 			match f["kind"]:
@@ -390,19 +444,27 @@ func _place_features() -> void:
 		_add_ground_cover()
 
 
+## Every dimension below is rolled in fine voxels and only then scaled into this
+## chunk's grid. Rolling first is what keeps the RNG stream identical at every
+## level, so a tree stays the same tree as it changes resolution instead of
+## turning into a different one while the two levels are cross fading.
 func _add_tree(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:
 	var big := rng.randf() < 0.18
-	var trunk_h := rng.randi_range(52, 74) if big else rng.randi_range(28, 46)
-	var trunk_r := 4 if big else rng.randi_range(2, 3)
+	var fine_trunk_h := rng.randi_range(52, 74) if big else rng.randi_range(28, 46)
+	var trunk_r := _r(4 if big else rng.randi_range(2, 3))
 	var lean_x := rng.randf_range(-0.06, 0.06)
 	var lean_z := rng.randf_range(-0.06, 0.06)
+	var trunk_h := _s(fine_trunk_h)
 
 	# trunk: only the outer ring of the cylinder is stored
-	for y in range(-2, trunk_h):
+	for y in range(-_s(2), trunk_h):
 		var cxo := int(round(float(y) * lean_x))
 		var czo := int(round(float(y) * lean_z))
 		var taper := trunk_r - int(float(y) / float(trunk_h) * 1.5)
-		var tr2 := maxi(taper, 1) * maxi(taper, 1)
+		# Zero, not one: at the coarse levels the whole trunk is a single voxel
+		# wide, and a floor of one here would leave the ring test below unable to
+		# recognise that voxel as the trunk's own surface and drop it.
+		var tr2 := maxi(taper, 0) * maxi(taper, 0)
 		for dz in range(-trunk_r, trunk_r + 1):
 			for dx in range(-trunk_r, trunk_r + 1):
 				var dd := dx * dx + dz * dz
@@ -436,40 +498,46 @@ func _add_tree(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> voi
 			rad + rng.randi_range(-3, 3),
 			int(rad * 0.75) + rng.randi_range(-2, 3),
 			rad + rng.randi_range(-3, 3))
+		off = Vector3i(_sv(off.x), _sv(off.y), _sv(off.z))
+		rr = Vector3i(_r(rr.x), _r(rr.y), _r(rr.z))
 		lobes.append({"c": top + off, "r": rr})
 		# short branch reaching into the lobe
 		if i > 0:
-			_line(top, top + off, 1, VoxelDefs.WOOD)
+			_line(top, top + off, _r(1), VoxelDefs.WOOD)
 	_blob_shell(lobes, VoxelDefs.LEAF, 0.22)
 
 
 func _add_cactus(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:
-	var h := rng.randi_range(14, 30)
-	var r := 2
-	for y in range(-2, h):
-		var rr := r - 1 if y >= h - 2 else r
+	var fine_h := rng.randi_range(14, 30)
+	var h := _s(fine_h)
+	var r := _r(2)
+	for y in range(-_s(2), h):
+		var rr := r - 1 if y >= h - _s(2) else r
 		for dz in range(-r, r + 1):
 			for dx in range(-r, r + 1):
 				if dx * dx + dz * dz > rr * rr:
 					continue
 				_put(lx + dx, base_y + y, lz + dz, VoxelDefs.CACTUS)
 	var arms := rng.randi_range(0, 2)
+	# Half thickness of an arm. One fine voxel either side is nothing at level 0
+	# and a five metre slab at the coarsest, so it scales like every other width.
+	var aw := _r(1)
 	for i in arms:
 		var side := 1 if rng.randf() < 0.5 else -1
 		var axis_x := rng.randf() < 0.5
-		var ay := base_y + rng.randi_range(int(h * 0.4), int(h * 0.7))
-		var reach := rng.randi_range(5, 9)
+		var ay := base_y + _sv(rng.randi_range(int(fine_h * 0.4), int(fine_h * 0.7)))
+		var reach := _s(rng.randi_range(5, 9))
 		for k in range(1, reach + 1):
-			for dy in range(-1, 2):
-				for dd in range(-1, 2):
+			for dy in range(-aw, aw + 1):
+				for dd in range(-aw, aw + 1):
 					if axis_x:
 						_put(lx + side * (r + k), ay + dy, lz + dd, VoxelDefs.CACTUS)
 					else:
 						_put(lx + dd, ay + dy, lz + side * (r + k), VoxelDefs.CACTUS)
-		var tip := rng.randi_range(6, 12)
+		var tip := _s(rng.randi_range(6, 12))
 		for k in tip:
-			for dy in range(-1, 2):
-				for dd in range(-1, 2):
+			for dy in range(-aw, aw + 1):
+				for dd in range(-aw, aw + 1):
 					if axis_x:
 						_put(lx + side * (r + reach) + dy, ay + k, lz + dd, VoxelDefs.CACTUS)
 					else:
@@ -478,9 +546,10 @@ func _add_cactus(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> v
 
 func _add_boulder(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:
 	var rad := rng.randi_range(4, 11)
+	var squash := rad + rng.randi_range(-2, 2)
 	var lobes := [{
-		"c": Vector3i(lx, base_y + rad / 3, lz),
-		"r": Vector3i(rad, int(rad * 0.8), rad + rng.randi_range(-2, 2)),
+		"c": Vector3i(lx, base_y + _sv(rad / 3), lz),
+		"r": Vector3i(_r(rad), _r(int(rad * 0.8)), _r(squash)),
 	}]
 	_blob_shell(lobes, VoxelDefs.STONE, 0.18)
 
@@ -495,13 +564,14 @@ func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fc
 		# spread around the big one, never further than the margin the feature
 		# scan covers, so no member can reach a chunk that does not know about it
 		var ang := start + TAU * float(i) / float(count) + rng.randf_range(-0.4, 0.4)
-		var dist := rng.randf_range(8.0, 22.0)
+		var dist := rng.randf_range(8.0, 22.0) / float(_k)
 		var mx := lx + int(round(cos(ang) * dist))
 		var mz := lz + int(round(sin(ang) * dist))
 		var scale := rng.randf_range(0.3, 0.72)
 		# each member sits on its own ground height, otherwise the small ones
 		# float or sink on a slope
-		var my := _gen.height_at(_ox + mx, _oz + mz)
+		var my := _gen.height_voxels(
+			float(_ox + mx) * _vs, float(_oz + mz) * _vs, _vs)
 		_add_one_mushroom(mx, mz, my, rng, _gen.rand01(fcx, fcz, 0x9c0b + (i + 1) * 977), scale)
 
 
@@ -509,16 +579,16 @@ func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fc
 ## The cap glows from underneath (radial gills) and from spots on its top.
 ## `scale` is 1.0 for the big one in a group and well below that for the rest.
 func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, phase: float, scale: float) -> void:
-	var stem_h := maxi(int(round(float(rng.randi_range(24, 46)) * scale)), 5)
-	var stem_r := maxi(int(round(float(rng.randi_range(3, 5)) * scale)), 1)
+	var stem_h := _s(maxi(int(round(float(rng.randi_range(24, 46)) * scale)), 5))
+	var stem_r := _r(maxi(int(round(float(rng.randi_range(3, 5)) * scale)), 1))
 	var lean_x := rng.randf_range(-0.05, 0.05)
 	var lean_z := rng.randf_range(-0.05, 0.05)
 
 	# stem: hollow ring, flaring out towards the foot
-	for y in range(-2, stem_h):
+	for y in range(-_s(2), stem_h):
 		var t := float(y) / float(stem_h)
 		var flare := 1.0 + pow(1.0 - t, 3.0) * 0.8
-		var r := maxi(int(round(float(stem_r) * flare)), 1)
+		var r := int(round(float(stem_r) * flare))
 		var r2 := r * r
 		var cxo := int(round(float(y) * lean_x))
 		var czo := int(round(float(y) * lean_z))
@@ -537,9 +607,10 @@ func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator
 	var cx := lx + int(round(float(stem_h) * lean_x))
 	var cz := lz + int(round(float(stem_h) * lean_z))
 	# the cap sinks a little onto the stem so there is no gap at the joint
-	var cap_y := base_y + stem_h - 2
-	var cap_r := maxi(int(round(float(rng.randi_range(11, 20)) * scale)), 4)
-	var cap_h := maxi(int(float(cap_r) * rng.randf_range(0.55, 0.8)), 3)
+	var cap_y := base_y + stem_h - _s(2)
+	var fine_cap_r := maxi(int(round(float(rng.randi_range(11, 20)) * scale)), 4)
+	var cap_r := _r(fine_cap_r)
+	var cap_h := _s(maxi(int(float(fine_cap_r) * rng.randf_range(0.55, 0.8)), 3))
 	var gills := maxi(int(round(float(rng.randi_range(9, 16)) * sqrt(scale))), 5)
 
 	# glowing spots scattered over the dome
@@ -549,14 +620,15 @@ func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator
 		var st := rng.randf_range(0.1, 0.8)
 		var sr := float(cap_r) * sqrt(maxf(1.0 - st * st, 0.0))
 		spots.append(Vector3(cos(a) * sr, st * float(cap_h), sin(a) * sr))
-	var spot_r2 := pow(maxf(float(cap_r) * 0.22, 2.0), 2.0)
+	var spot_r2 := pow(maxf(float(cap_r) * 0.22, float(_s(2))), 2.0)
 
 	for y in range(0, cap_h + 1):
 		var t := float(y) / float(cap_h)
 		var r := float(cap_r) * sqrt(maxf(1.0 - t * t, 0.0))
 		var ri := int(round(r))
 		var r2 := r * r
-		var inner := maxf(r - 2.2, 0.0)
+		# The shell never thins below one voxel, whatever this level's are worth.
+		var inner := maxf(r - maxf(2.2 / float(_k), 1.0), 0.0)
 		var inner2 := inner * inner
 		for dz in range(-ri, ri + 1):
 			for dx in range(-ri, ri + 1):
@@ -595,7 +667,7 @@ func _add_mushroom_light(cx: int, base_y: int, stem_h: int, cz: int, cap_r: int,
 	# and the cap's underside, low enough to pool on the grass below.
 	var y := float(base_y) + float(stem_h) * 0.35
 	_lights.append({
-		"pos": Vector3(float(cx) * VS, y * VS, float(cz) * VS),
+		"pos": Vector3(float(cx) * _vs, y * _vs, float(cz) * _vs),
 		"radius": 6.0 + float(cap_r) * 0.7,
 		"energy": 1.3 + float(cap_r) * 0.14,
 		"phase": phase,
@@ -725,12 +797,12 @@ func _mesh_features() -> void:
 		_glow = VoxelDefs.GLOW.has(mat)
 		if _glow:
 			_glow_uv = Vector2(VoxelDefs.GLOW[mat], _glow_phase.get(p, 0.0))
-		var x0 := float(p.x) * VS
-		var x1 := x0 + VS
-		var y0 := float(p.y) * VS
-		var y1 := y0 + VS
-		var z0 := float(p.z) * VS
-		var z1 := z0 + VS
+		var x0 := float(p.x) * _vs
+		var x1 := x0 + _vs
+		var y0 := float(p.y) * _vs
+		var y1 := y0 + _vs
+		var z0 := float(p.z) * _vs
+		var z1 := z0 + _vs
 		for n in _NEIGHBOURS:
 			var q := p + n
 			if _extras.has(q):
@@ -764,5 +836,5 @@ func _mesh_features() -> void:
 ## ground, 1 at the tip of a tuft) and a phase that is unique per tuft column
 ## so neighbouring tufts do not sway in lockstep.
 func _sway_data(p: Vector3i) -> Vector2:
-	var above := float(p.y - _h(clampi(p.x, -1, CS), clampi(p.z, -1, CS))) * VS
-	return Vector2(clampf(above / 0.4, 0.0, 1.0), _gen.rand01(_ox + p.x, _oz + p.z, 0x21ad))
+	var above := float(p.y - _h(clampi(p.x, -1, CS), clampi(p.z, -1, CS))) * _vs
+	return Vector2(clampf(above / (_vs * 4.0), 0.0, 1.0), _gen.rand01(_ox + p.x, _oz + p.z, 0x21ad))
