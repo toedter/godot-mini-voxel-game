@@ -29,7 +29,7 @@ script = ExtResource("3_phys")
 [node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, -0.1)
 near = 0.05
-far = 400.0
+far = 1500.0
 
 [node name="LeftHand" type="XRController3D" parent="XROrigin3D"]
 tracker = &"left_hand"

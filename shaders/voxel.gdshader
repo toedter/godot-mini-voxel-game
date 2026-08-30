@@ -11,10 +11,13 @@ void vertex() {
 }
 
 void fragment() {
+	if (dissolve_away(v_world, length(VERTEX))) {
+		discard;
+	}
 	// Scaling the albedo down and adding the haze as emission means the haze is
 	// not affected by lighting: a fully hazed fragment is exactly sky coloured
 	// no matter whether it sits in sunlight or in shadow.
-	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX);
+	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX, v_world.y);
 	ALBEDO = voxel_albedo(v_world, v_world_normal, COLOR) * (1.0 - haze.a);
 	EMISSION = haze.rgb * haze.a;
 	ROUGHNESS = 0.95;

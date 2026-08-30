@@ -27,6 +27,8 @@ const SHROOM_STEM := 10
 const SHROOM_CAP := 11
 const SHROOM_GLOW := 12
 const SEABED := 13
+const SNOW := 14
+const ICE := 15
 
 const COLORS := {
 	GRASS: Color(0.310, 0.600, 0.180),
@@ -42,6 +44,8 @@ const COLORS := {
 	SHROOM_CAP: Color(0.360, 0.170, 0.480),
 	SHROOM_GLOW: Color(0.640, 0.380, 0.900),
 	SEABED: Color(0.545, 0.520, 0.430),
+	SNOW: Color(0.930, 0.950, 0.980),
+	ICE: Color(0.735, 0.855, 0.925),
 }
 
 ## Per-material strength of the random per-voxel brightness variation.
@@ -60,6 +64,8 @@ const TINT := {
 	SHROOM_CAP: 0.14,
 	SHROOM_GLOW: 0.08,
 	SEABED: 0.20,
+	SNOW: 0.09,
+	ICE: 0.10,
 }
 
 ## Materials drawn with the glow shader, and how brightly each one lights up
@@ -78,6 +84,10 @@ const SUBSURFACE := {
 	SANDSTONE: SANDSTONE,
 	STONE: STONE,
 	SEABED: SANDSTONE,
+	# Snow and ice are a thin cover: anything more than one voxel deep shows
+	# the rock of the mountain underneath.
+	SNOW: STONE,
+	ICE: STONE,
 }
 
 ## Materials that the player collides with (leaves and grass are walk-through).

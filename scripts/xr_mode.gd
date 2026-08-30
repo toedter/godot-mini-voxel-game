@@ -12,6 +12,7 @@ extends Node3D
 @export var desktop_player_path: NodePath = ^"../Player"
 @export var world_path: NodePath = ^"../VoxelWorld"
 @export var atmosphere_path: NodePath = ^"../WorldEnvironment"
+@export var sun_path: NodePath = ^"../Sun"
 @export var hud_path: NodePath = ^"../HUD"
 
 ## Brings up the XR rig even when no headset is present. Only useful for
@@ -23,6 +24,13 @@ extends Node3D
 @export var xr_view_distance: int = 5
 ## SSAO is a full screen effect and gets rendered per eye; off by default in XR.
 @export var xr_disable_ssao: bool = true
+## Cell size (m) of the distant island mesh in XR. Four metres is a quarter of
+## the vertices of the desktop default and still stays under the streamed
+## chunks; the mesh is drawn twice over, so it is worth the coarser ground.
+@export var xr_far_step: float = 4.0
+## How far (m) the sun and moon cast in XR. The cascades are rendered per eye,
+## so the horizon they reach to is pulled in with everything else.
+@export var xr_shadow_distance: float = 120.0
 
 var xr_active := false
 
@@ -102,6 +110,13 @@ func _tune_for_xr() -> void:
 	var world := get_node_or_null(world_path)
 	if world != null and "view_distance" in world:
 		world.view_distance = xr_view_distance
+		# Runs before VoxelWorld is ready, so the distant island is built at
+		# the XR resolution rather than built twice.
+		world.far_step = xr_far_step
+
+	var sun := get_node_or_null(sun_path) as DirectionalLight3D
+	if sun != null:
+		sun.directional_shadow_max_distance = xr_shadow_distance
 
 	if xr_disable_ssao:
 		var we := get_node_or_null(atmosphere_path) as WorldEnvironment

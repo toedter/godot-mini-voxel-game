@@ -162,7 +162,7 @@ void fragment() {
 	}
 
 	vec3 albedo = mix(body, foam_color, foam);
-	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX);
+	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX, v_world.y);
 	// Far out the sea has to end up exactly sky coloured and fully opaque,
 	// otherwise the horizon shows a seam where the water is still see-through.
 	ALBEDO = albedo * (1.0 - haze.a);

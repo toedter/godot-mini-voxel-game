@@ -134,8 +134,6 @@ func _run() -> Dictionary:
 func _sample_columns() -> void:
 	_heights.resize(MS * MS)
 	_mats.resize(MS * MS)
-	var desert_flags := PackedByteArray()
-	desert_flags.resize(MS * MS)
 
 	for lz in range(-1, CS + 1):
 		for lx in range(-1, CS + 1):
@@ -143,7 +141,6 @@ func _sample_columns() -> void:
 			var mx := float(_ox + lx) * VS
 			var mz := float(_oz + lz) * VS
 			_heights[i] = int(floor(_gen.height_meters(mx, mz) / VS))
-			desert_flags[i] = 1 if _gen.is_desert(mx, mz) else 0
 
 	for lz in range(-1, CS + 1):
 		for lx in range(-1, CS + 1):
@@ -154,29 +151,9 @@ func _sample_columns() -> void:
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx + 1, lz)]))
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz - 1)]))
 			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz + 1)]))
-			var desert := desert_flags[i] != 0
-			var m := VoxelDefs.SAND if desert else VoxelDefs.GRASS
-			if slope > 16:
-				m = VoxelDefs.STONE
-			elif slope > 6:
-				m = VoxelDefs.SANDSTONE if desert else VoxelDefs.DIRT
-
-			# The sea overrules the biome: the island is ringed by a beach that
-			# carries on below the waterline and darkens into the sea bed.
-			# Steep faces stay rock, so cliffs still drop straight into the water.
-			var surface := float(h) * VS
-			if surface < VoxelDefs.SEA_LEVEL + 2.2 and slope <= 16:
-				var mx := float(_ox + lx) * VS
-				var mz := float(_oz + lz) * VS
-				# Both limits ride on the same jittered value, so neither the
-				# top of the beach nor the start of the sea bed runs along a
-				# clean contour line.
-				var bt := _gen.beach_top(mx, mz)
-				if surface < bt - 3.9:
-					m = VoxelDefs.SEABED
-				elif surface < bt:
-					m = VoxelDefs.SAND
-			_mats[i] = m
+			var mx := float(_ox + lx) * VS
+			var mz := float(_oz + lz) * VS
+			_mats[i] = _gen.surface_material(mx, mz, float(h) * VS, slope)
 
 
 func _clamp_idx(lx: int, lz: int) -> int:

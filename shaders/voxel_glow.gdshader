@@ -30,7 +30,10 @@ void vertex() {
 }
 
 void fragment() {
-	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX);
+	if (dissolve_away(v_world, length(VERTEX))) {
+		discard;
+	}
+	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX, v_world.y);
 	vec3 base = voxel_albedo(v_world, v_world_normal, COLOR);
 
 	float pulse = 1.0 + pulse_depth * sin(TIME * pulse_speed + v_phase * TAU);

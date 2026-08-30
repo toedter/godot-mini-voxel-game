@@ -39,6 +39,41 @@ const LAND_MEAN := 12.0
 ## Never let a column fall below this, columns start at y = 0.
 const MIN_HEIGHT := 0.5
 
+## How many peaks the massif in the middle of the island is made of.
+const MOUNTAIN_COUNT := 3
+## Distance (m) from the island's centre to the middle of the massif. Kept well
+## inside the coast, and off the origin so the spawn looks at the range rather
+## than standing on it.
+const MASSIF_OFFSET := 155.0
+## Radius (m) of the ring the individual peaks are scattered on.
+const PEAK_SPREAD := 74.0
+## Height (m) a single peak rises above the island's plain, and the radius (m)
+## of the skirt it rises over. The ratio of the two decides how steep the
+## flanks are; at these values they stay walkable.
+const PEAK_MIN_HEIGHT := 48.0
+const PEAK_MAX_HEIGHT := 62.0
+const PEAK_MIN_RADIUS := 98.0
+const PEAK_MAX_RADIUS := 126.0
+## How far (m) the massif is displaced before it is sampled, so the flanks are
+## buckled instead of being smooth cones.
+const MOUNTAIN_WARP := 26.0
+## Height (m) of the ridges laid over the cones, and of the fine rubble on top
+## of those. Both are kept low enough that no face becomes unclimbable.
+const RIDGE_RELIEF := 7.0
+const CRAG_RELIEF := 1.5
+
+## World Y above which the soil has been scoured off and the mountain is bare
+## rock, above which the snow stays all year, and above which the summit is
+## capped with ice. All three are jittered before they are used.
+const ROCK_LINE := SEA_LEVEL + 30.0
+const SNOW_LINE := SEA_LEVEL + 48.0
+const ICE_LINE := SEA_LEVEL + 58.0
+## Steepness (height difference in voxels between neighbouring 10 cm columns)
+## above which a face is treated as a cliff and stays bare rock, and below
+## which a summit is flat enough to freeze over.
+const CLIFF_SLOPE := 16
+const ICE_SLOPE := 1
+
 var world_seed: int = 1337
 
 var _n_cont := FastNoiseLite.new()
@@ -51,6 +86,12 @@ var _n_warp_x := FastNoiseLite.new()
 var _n_warp_z := FastNoiseLite.new()
 var _n_edge := FastNoiseLite.new()
 var _n_coast := FastNoiseLite.new()
+var _n_ridge := FastNoiseLite.new()
+var _n_crag := FastNoiseLite.new()
+var _n_mwarp := FastNoiseLite.new()
+
+## The peaks of the massif: {pos: Vector2, h: float, r: float}.
+var _peaks: Array[Dictionary] = []
 
 
 func _init(s: int = 1337) -> void:
@@ -110,6 +151,76 @@ func _init(s: int = 1337) -> void:
 	_n_coast.fractal_octaves = 4
 	_n_coast.fractal_gain = 0.45
 
+	# Ridged noise: the absolute value of a smooth field has creases along its
+	# zero crossings, which is what gives a mountain its arêtes and gullies.
+	_n_ridge.seed = s + 149
+	_n_ridge.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_n_ridge.frequency = 0.014
+	_n_ridge.fractal_octaves = 3
+	_n_ridge.fractal_gain = 0.42
+
+	_n_crag.seed = s + 167
+	_n_crag.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_n_crag.frequency = 0.06
+	_n_crag.fractal_octaves = 2
+
+	_n_mwarp.seed = s + 181
+	_n_mwarp.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_n_mwarp.frequency = 0.006
+	_n_mwarp.fractal_octaves = 2
+
+	_place_peaks()
+
+
+## Scatters the peaks around a point in the middle of the island. Everything is
+## derived from the seed, so the range is identical on every thread.
+func _place_peaks() -> void:
+	var base_a := rand01(0, 0, 0x9a17) * TAU
+	var centre := Vector2(cos(base_a), sin(base_a)) * MASSIF_OFFSET
+	for i in MOUNTAIN_COUNT:
+		# Evenly spaced around the massif's centre with a little jitter, so the
+		# peaks form a range with saddles between them instead of one dome.
+		var a := base_a + TAU * (float(i) + rand01(i, 3, 0x51) * 0.6) / float(MOUNTAIN_COUNT)
+		var r := PEAK_SPREAD * (0.45 + 0.55 * rand01(i, 7, 0x52))
+		_peaks.append({
+			"pos": centre + Vector2(cos(a), sin(a)) * r,
+			"h": lerpf(PEAK_MIN_HEIGHT, PEAK_MAX_HEIGHT, rand01(i, 11, 0x53)),
+			"r": lerpf(PEAK_MIN_RADIUS, PEAK_MAX_RADIUS, rand01(i, 13, 0x54)),
+		})
+
+
+## The massif at this spot: x = the height (m) it adds to the island, y = how
+## much of the mountain terrain has taken over here, 0 on the plain and 1 near
+## a summit.
+func massif(mx: float, mz: float) -> Vector2:
+	# Displacing the sample point bends the outline of every cone, so the range
+	# reads as rock that was pushed up rather than as a pile of smooth hills.
+	var wx := mx + _n_mwarp.get_noise_2d(mx, mz) * MOUNTAIN_WARP
+	var wz := mz + _n_mwarp.get_noise_2d(mx + 517.0, mz - 233.0) * MOUNTAIN_WARP
+	var cone := 0.0
+	var mask := 0.0
+	for p in _peaks:
+		var pos: Vector2 = p["pos"]
+		var dx := wx - pos.x
+		var dz := wz - pos.y
+		var pr: float = p["r"]
+		var d := sqrt(dx * dx + dz * dz) / pr
+		if d >= 1.0:
+			continue
+		# Taking the maximum rather than the sum leaves a saddle where two
+		# skirts overlap, which is exactly where a pass between peaks belongs.
+		var f := smoothstep(1.0, 0.0, d)
+		cone = maxf(cone, f * float(p["h"]))
+		mask = maxf(mask, f)
+	if mask <= 0.0:
+		return Vector2.ZERO
+	# The crags fade out at the foot of the range so they do not spill rubble
+	# over the surrounding grassland.
+	var m2 := smoothstep(0.0, 0.30, mask)
+	var ridge := 1.0 - absf(_n_ridge.get_noise_2d(mx, mz))
+	var relief := (ridge - 0.5) * 2.0 * RIDGE_RELIEF + _n_crag.get_noise_2d(mx, mz) * CRAG_RELIEF
+	return Vector2(cone + relief * m2, mask)
+
 
 ## 0.0 = pure grassland, 1.0 = pure desert. Continuous, so the terrain height
 ## and the haze can cross fade over the whole width of the border region.
@@ -162,8 +273,11 @@ func height_meters(mx: float, mz: float) -> float:
 		+ _n_hill.get_noise_2d(mx * 1.7, mz * 1.7) * 0.6
 
 	# The hills, dunes and continental swell are only the *relief*; where that
-	# relief sits vertically is decided by the island profile below.
-	var relief := lerpf(grass_h, desert_h, b) - LAND_MEAN
+	# relief sits vertically is decided by the island profile below. Under the
+	# massif the rolling hills are mostly overruled, so the mountains rise from
+	# an even plinth instead of inheriting the swell of the plain.
+	var mnt := massif(mx, mz)
+	var relief := (lerpf(grass_h, desert_h, b) - LAND_MEAN) * (1.0 - 0.75 * mnt.y)
 
 	var u := shore_u(mx, mz)
 	# Depth profile of the sea bed, in metres below the waterline. It drops
@@ -181,8 +295,8 @@ func height_meters(mx: float, mz: float) -> float:
 
 	# Relief is damped under water so the sea bed stays a calm slope, but not
 	# removed: what is left keeps the coastline ragged and carves the odd
-	# lagoon or sand bar out of the shallows.
-	return maxf(profile + relief * lerpf(0.28, 1.0, land), MIN_HEIGHT)
+	# lagoon or sand bar out of the shallows. The massif only exists on land.
+	return maxf(profile + relief * lerpf(0.28, 1.0, land) + mnt.x * land, MIN_HEIGHT)
 
 
 ## Height of a column in voxels (the column occupies y = 0 .. h-1).
@@ -204,6 +318,80 @@ func is_submerged(x: float, z: float) -> bool:
 ## stay bare sand. Jittered so the sand does not stop along a perfect contour.
 func beach_top(mx: float, mz: float) -> float:
 	return SEA_LEVEL + 1.25 + _n_edge.get_noise_2d(mx * 0.55, mz * 0.55) * 0.9
+
+
+## Two scales of jitter for the alpine bands: a long wave that makes the tree
+## line and the snow line wander over tens of metres, plus a fine one that lets
+## the two materials interlock in patches instead of meeting along a contour.
+func _alpine_jitter(mx: float, mz: float) -> float:
+	return _n_edge.get_noise_2d(mx * 0.30 + 91.0, mz * 0.30 - 57.0) * 4.0 \
+		+ _n_edge.get_noise_2d(mx, mz) * 1.4
+
+
+## World Y above which the mountain is bare rock at this spot.
+func rock_line(mx: float, mz: float) -> float:
+	return ROCK_LINE + _alpine_jitter(mx, mz)
+
+
+## World Y above which the mountain keeps its snow, and above which the summit
+## is iced over. The two share one jitter value so the ice never ends up
+## outside the snow it is supposed to sit in.
+func snow_line(mx: float, mz: float) -> float:
+	return SNOW_LINE + _alpine_jitter(mx, mz)
+
+
+func ice_line(mx: float, mz: float) -> float:
+	return ICE_LINE + _alpine_jitter(mx, mz) * 0.6
+
+
+## The material a column's top voxel is made of. `surface` is the world Y of
+## that voxel and `slope` the largest height difference (in voxels) to a
+## neighbouring column, i.e. how steeply the ground falls away here.
+##
+## Shared by the chunk mesher and the distant island mesh so both agree on
+## where the beach, the rock and the snow line sit.
+func surface_material(mx: float, mz: float, surface: float, slope: int) -> int:
+	var desert := is_desert(mx, mz)
+	var m := VoxelDefs.SAND if desert else VoxelDefs.GRASS
+	if slope > CLIFF_SLOPE:
+		m = VoxelDefs.STONE
+	elif slope > 6:
+		m = VoxelDefs.SANDSTONE if desert else VoxelDefs.DIRT
+
+	# The sea overrules the biome: the island is ringed by a beach that carries
+	# on below the waterline and darkens into the sea bed. Steep faces stay
+	# rock, so cliffs still drop straight into the water.
+	if surface < SEA_LEVEL + 2.2 and slope <= CLIFF_SLOPE:
+		# Both limits ride on the same jittered value, so neither the top of
+		# the beach nor the start of the sea bed runs along a clean contour.
+		var bt := beach_top(mx, mz)
+		if surface < bt - 3.9:
+			return VoxelDefs.SEABED
+		if surface < bt:
+			return VoxelDefs.SAND
+		return m
+
+	# Up on the mountains the soil is gone, then the snow starts and the last
+	# stretch to the summit is iced over. Cliffs stay bare rock all the way up:
+	# nothing settles on a face that steep.
+	if surface < rock_line(mx, mz):
+		return m
+	if slope > CLIFF_SLOPE or surface < snow_line(mx, mz):
+		return VoxelDefs.STONE
+	if surface >= ice_line(mx, mz) and slope <= ICE_SLOPE:
+		return VoxelDefs.ICE
+	return VoxelDefs.SNOW
+
+
+## Roughly how much of the ground here is under a canopy, 0 to 1. The distant
+## island mesh is far too coarse to carry individual trees, so it uses this to
+## tint the woods instead.
+func woodland(mx: float, mz: float) -> float:
+	if is_desert(mx, mz):
+		return 0.0
+	var forest: float = maxf(_n_forest.get_noise_2d(mx, mz), 0.0)
+	var density: float = (0.20 + forest * 0.55) * maxf(1.0 - biome_at(mx, mz) * 1.15, 0.08)
+	return clampf(density * 1.6, 0.0, 1.0)
 
 
 # --------------------------------------------------------------------------
@@ -242,7 +430,14 @@ func feature_in_cell(cell_x: int, cell_z: int) -> Dictionary:
 	var ground := height_meters(mx, mz)
 	if ground < SEA_LEVEL - 1.2:
 		return {}
-	var planted := ground >= beach_top(mx, mz)
+	# Above the tree line only loose rock is left, and the iced over summits
+	# carry nothing at all.
+	var rock := ground >= rock_line(mx, mz)
+	if ground >= ice_line(mx, mz):
+		return {}
+	var planted := ground >= beach_top(mx, mz) and not rock
+	if rock:
+		return {"kind": "boulder", "x": wx, "z": wz} if roll < 0.30 else {}
 
 	# Uses the same dithered decision as the ground material, so a lone patch of
 	# sand inside the grassland grows cacti and a green nook keeps its trees.

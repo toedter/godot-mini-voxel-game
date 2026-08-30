@@ -41,6 +41,37 @@ uniform float haze_sky_curve = 0.5;
 uniform float haze_begin = 12.0;
 uniform float haze_end = 34.4;
 uniform float haze_curve = 1.6;
+// The mist lies on the ground: above `mist_top` the air thins out over
+// `mist_depth` metres, down to `mist_floor` of its density at the bottom. This
+// is what lets a mountain be seen from right across the island while the plain
+// it stands on still fades out after a few dozen metres.
+uniform float mist_top = 44.0;
+uniform float mist_depth = 24.0;
+uniform float mist_floor : hint_range(0.02, 1.0) = 0.10;
+
+// Handover to the distant island.
+//
+// Streamed chunks stop at a hard circle around the player. Rather than letting
+// that circle show, the chunk geometry is thinned out stochastically over the
+// last few metres before it: holes open up in it and grow until nothing is
+// left, and the coarse mesh of the whole island, which sits just below the
+// streamed surface, takes over. Left at their defaults nothing is ever
+// dropped, so the distant mesh alone decides whether the handover happens.
+uniform float dissolve_begin = 1e8;
+uniform float dissolve_end = 1e9;
+
+// True when this fragment belongs to the part of the chunk that has already
+// been handed over. The pattern is keyed to the world grid, so the holes stay
+// put instead of crawling over the ground as the player moves.
+bool dissolve_away(vec3 world, float dist) {
+	float t = smoothstep(dissolve_begin, dissolve_end, dist);
+	if (t <= 0.0) {
+		return false;
+	}
+	// Cells a few voxels across: big enough to stay stable under motion,
+	// small enough to read as a fade rather than as chunks going missing.
+	return hash13(floor(world / max(voxel_size * 4.0, 0.001))) < t;
+}
 
 // Same gradient as the ProceduralSkyMaterial of the WorldEnvironment.
 vec3 haze_sky(vec3 dir) {
@@ -54,8 +85,12 @@ vec3 haze_sky(vec3 dir) {
 }
 
 // Returns the haze colour in rgb and how much of it covers the fragment in a.
-vec4 haze_over(vec3 view_pos, mat4 inv_view) {
-	float a = pow(smoothstep(haze_begin, haze_end, length(view_pos)), haze_curve);
+// `world_y` is the height the fragment sits at, which decides how thick the
+// air between it and the eye is.
+vec4 haze_over(vec3 view_pos, mat4 inv_view, float world_y) {
+	float thickness = clamp(
+		exp(-max(world_y - mist_top, 0.0) / max(mist_depth, 0.001)), mist_floor, 1.0);
+	float a = pow(smoothstep(haze_begin, haze_end, length(view_pos) * thickness), haze_curve);
 	vec3 dir = normalize((inv_view * vec4(view_pos, 0.0)).xyz);
 	return vec4(haze_sky(dir), a);
 }

@@ -43,7 +43,10 @@ void vertex() {
 }
 
 void fragment() {
-	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX);
+	if (dissolve_away(v_world, length(VERTEX))) {
+		discard;
+	}
+	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX, v_world.y);
 	ALBEDO = voxel_albedo(v_world, v_world_normal, COLOR) * (1.0 - haze.a);
 	EMISSION = haze.rgb * haze.a;
 	ROUGHNESS = 0.95;

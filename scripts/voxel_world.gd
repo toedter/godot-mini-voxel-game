@@ -30,11 +30,26 @@ signal world_ready
 ## inside detail_distance, since that is where the lights are created.
 @export_range(4.0, 40.0, 0.5) var glow_light_distance: float = 17.0
 ## Side length (m) of the sea plane that follows the player. Only has to reach
-## past the point where the haze has closed in completely.
-@export_range(40.0, 600.0, 10.0) var water_extent: float = 340.0
+## past the point where the haze has closed in completely; past it the distant
+## island mesh paints the rest of the sea.
+@export_range(40.0, 1200.0, 10.0) var water_extent: float = 560.0
 ## Size (m) of one quad of the sea plane. Smaller means the swell is carried by
-## the geometry rather than only by the shading.
-@export_range(0.5, 8.0, 0.1) var water_quad: float = 2.0
+## the geometry rather than only by the shading. The wave normals are worked out
+## per fragment, so this mostly decides how well the swell holds its shape
+## against the sky rather than how detailed the water looks.
+@export_range(0.5, 8.0, 0.1) var water_quad: float = 2.5
+## Half size (m) of the coarse mesh of the whole island. Has to reach past the
+## point where the haze closes in from a mountain top, otherwise the world ends
+## in a visible edge up there.
+@export_range(200.0, 2000.0, 10.0) var far_extent: float = 1300.0
+## Size (m) of one cell of that mesh. Only the island is meshed this finely;
+## open water is folded down to one quad per 8x8 cells, which is what pays for
+## it. Raise it for a cheaper build and a smaller mesh (XR).
+@export_range(1.0, 25.6, 0.1) var far_step: float = 2.0
+## How far (m) the coarse mesh is sunk below the real surface, so that it can
+## never poke through the streamed chunks in a hollow. Steep ground is sunk
+## further; see FarTerrain.
+@export_range(0.0, 4.0, 0.1) var far_drop: float = 0.5
 @export var player_path: NodePath = ^"../Player"
 
 var gen: TerrainGen
@@ -43,7 +58,13 @@ var _material: ShaderMaterial
 var _grass_material: ShaderMaterial
 var _glow_material: ShaderMaterial
 var _water_material: ShaderMaterial
+var _far_material: ShaderMaterial
+var _far_canopy_material: ShaderMaterial
 var _water: MeshInstance3D
+var _far: Node3D
+var _far_job: int = -1
+var _far_tiles: Array = []
+var _far_built := false
 var _chunks := {} # Vector2i -> Dictionary {node, detail, collision}
 var _jobs := {} # Vector2i -> task id
 var _queue: Array[Vector2i] = []
@@ -62,6 +83,7 @@ func _ready() -> void:
 	gen = TerrainGen.new(world_seed)
 	_ensure_materials()
 	_create_water()
+	_create_far_terrain()
 	_spawn_player()
 	_update_center(true)
 
@@ -70,7 +92,43 @@ func _ready() -> void:
 ## haze settings into them, is readied before this node.
 func haze_materials() -> Array[ShaderMaterial]:
 	_ensure_materials()
-	return [_material, _grass_material, _glow_material, _water_material]
+	return [_material, _grass_material, _glow_material, _water_material,
+		_far_material, _far_canopy_material]
+
+
+## The materials of the streamed chunks. These are the ones that dissolve into
+## the distant island at the edge of the loaded area.
+func chunk_materials() -> Array[ShaderMaterial]:
+	_ensure_materials()
+	return [_material, _grass_material, _glow_material]
+
+
+## The two materials of the distant island: the ground and the canopy shell
+## over its woods. Atmosphere hands the canopy the band it has to fade in over,
+## which is the same one the chunks dissolve across.
+func far_materials() -> Array[ShaderMaterial]:
+	_ensure_materials()
+	return [_far_material, _far_canopy_material]
+
+
+func far_canopy_material() -> ShaderMaterial:
+	_ensure_materials()
+	return _far_canopy_material
+
+
+## Where the eye is, for the canopy handover. A uniform rather than the camera
+## position the shader already has, so that the shadow pass drops the same
+## crowns the colour pass does.
+func set_far_eye(pos: Vector3) -> void:
+	for m in far_materials():
+		m.set_shader_parameter("eye_pos", pos)
+
+
+## Shows or hides the distant island. Under water it would only show as a false
+## floor a few metres down.
+func set_far_visible(on: bool) -> void:
+	if _far != null:
+		_far.visible = on
 
 
 ## The material the glowing mushroom caps are drawn with. Atmosphere drives its
@@ -117,6 +175,63 @@ func _ensure_materials() -> void:
 	_glow_material.set_shader_parameter("pulse_depth", glow_pulse_depth)
 	_water_material = ShaderMaterial.new()
 	_water_material.shader = load("res://shaders/water.gdshader")
+	var far_shader := load("res://shaders/far_terrain.gdshader")
+	_far_material = ShaderMaterial.new()
+	_far_material.shader = far_shader
+	_far_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
+	_far_canopy_material = ShaderMaterial.new()
+	_far_canopy_material.shader = far_shader
+	_far_canopy_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
+
+
+## The distant island is static, so it is built once on a worker thread and
+## then left alone. Until it arrives the world simply ends in the haze, exactly
+## as it did before.
+func _create_far_terrain() -> void:
+	_far = Node3D.new()
+	_far.name = "FarTerrain"
+	_far.visible = false
+	add_child(_far)
+	_far_job = WorkerThreadPool.add_task(_far_job_run, false, "far_terrain")
+
+
+func _far_job_run() -> void:
+	var tiles := FarTerrain.build(gen, far_extent, far_step, far_drop)
+	_mutex.lock()
+	_far_tiles = tiles
+	_far_built = true
+	_mutex.unlock()
+
+
+## Hands the finished tiles over on the main thread.
+func _integrate_far_terrain() -> void:
+	if _far_job < 0:
+		return
+	_mutex.lock()
+	var done := _far_built
+	var tiles: Array = _far_tiles
+	_mutex.unlock()
+	if not done:
+		return
+	WorkerThreadPool.wait_for_task_completion(_far_job)
+	_far_job = -1
+	_far_tiles = []
+	if _far == null:
+		return
+	for t in tiles:
+		var mi := MeshInstance3D.new()
+		mi.mesh = t["mesh"]
+		mi.position = t["pos"]
+		mi.set_surface_override_material(0, _far_material)
+		var canopy: int = t["canopy_surface"]
+		if canopy >= 0:
+			mi.set_surface_override_material(canopy, _far_canopy_material)
+		# Distant hills are what puts a mountain shadow across the island, but
+		# a tile of open water is flat and at the waterline, so it can only
+		# cost cascade time.
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON \
+			if t["has_land"] else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_far.add_child(mi)
 
 
 ## The sea is a single plane that is kept centred on the player. Its waves are
@@ -154,6 +269,9 @@ func _exit_tree() -> void:
 	for id in _jobs.values():
 		WorkerThreadPool.wait_for_task_completion(id)
 	_jobs.clear()
+	if _far_job >= 0:
+		WorkerThreadPool.wait_for_task_completion(_far_job)
+		_far_job = -1
 
 
 func _spawn_player() -> void:
@@ -183,6 +301,7 @@ func _dry_spawn_point() -> Vector2:
 func _process(delta: float) -> void:
 	_update_center(false)
 	_update_water()
+	_integrate_far_terrain()
 	_pump_jobs()
 	_integrate_results()
 	_update_lights(delta)
@@ -373,6 +492,10 @@ func biome_name_at(pos: Vector3) -> String:
 		return "Ocean"
 	if g < gen.beach_top(pos.x, pos.z):
 		return "Beach"
+	if g >= gen.snow_line(pos.x, pos.z):
+		return "Summit"
+	if g >= gen.rock_line(pos.x, pos.z):
+		return "Mountains"
 	return "Desert" if gen.is_desert(pos.x, pos.z) else "Grassland"
 
 
