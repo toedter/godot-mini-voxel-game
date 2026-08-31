@@ -37,8 +37,11 @@ signal world_ready
 			return
 		_push_canopy_band()
 		_update_center(true)
-## Chunks within this radius (m) also get grass tufts / pebbles.
-@export_range(0.0, 100.0, 1.0) var detail_range: float = 19.2
+## Chunks within this radius (m) get the point lights the mushroom caps cast on
+## their surroundings. Those are real nodes and the only part of a chunk that is
+## not built for the whole disc; _update_lights fades them up over the last
+## stretch before the boundary, so none of them is ever seen switching on.
+@export_range(0.0, 100.0, 1.0) var light_range: float = 19.2
 ## Chunks within this radius (m) get a collision shape.
 @export_range(0.0, 100.0, 1.0) var collision_range: float = 19.2
 @export var max_parallel_jobs: int = 6
@@ -77,7 +80,7 @@ signal world_ready
 ## Multiplier on the light the mushroom caps cast on their surroundings.
 @export_range(0.0, 4.0, 0.05) var glow_light_energy: float = 1.0
 ## How far the cast light reaches before it has faded out completely. Must stay
-## inside detail_range, since that is where the lights are created.
+## inside light_range, since that is where the lights are created.
 @export_range(4.0, 40.0, 0.5) var glow_light_distance: float = 17.0
 ## Side length (m) of the sea plane that follows the player. Only has to reach
 ## past the point where the haze has closed in completely; past it the distant
@@ -125,7 +128,7 @@ var _far_built := false
 ## A chunk is not a node. Its mesh is a bare RenderingServer instance, which is
 ## all a static lump of geometry needs and skips the scene tree entirely; only
 ## the few chunks that carry collision or mushroom lights own real nodes. The
-## entry holds {inst, mesh, body, lights, detail, collision, shadows} - `mesh`
+## entry holds {inst, mesh, body, lights, lit, collision, shadows} - `mesh`
 ## is kept purely to hold a reference, since freeing the ArrayMesh would take
 ## its RID out from under the instance.
 var _chunks := {}
@@ -401,10 +404,10 @@ func _update_lights(delta: float) -> void:
 	var p := get_node_or_null(player_path)
 	if p != null:
 		eye = (p as Node3D).global_position
-	# A chunk only gains lights once it comes within detail_range, so without a
+	# A chunk only gains lights once it comes within light_range, so without a
 	# fade a whole grove would light up the instant it crossed that line. Fade
 	# over the last stretch before the boundary and the switch is invisible.
-	var far: float = minf(glow_light_distance, detail_range)
+	var far: float = minf(glow_light_distance, light_range)
 	var near := far * 0.55
 	var alive: Array[OmniLight3D] = []
 	for l in _mushroom_lights:
@@ -473,9 +476,9 @@ func _rebuild_queue() -> void:
 			if _jobs.has(key):
 				continue
 			if _chunks.has(key):
-				# upgrade a chunk that came into the detail / collision range
+				# upgrade a chunk that came into the light / collision range
 				var info: Dictionary = _chunks[key]
-				if (_wants_detail(near) and not info["detail"]) or (_wants_collision(near) and not info["collision"]):
+				if (_wants_lights(near) and not info["lit"]) or (_wants_collision(near) and not info["collision"]):
 					wanted.append([near, key])
 				continue
 			wanted.append([near, key])
@@ -488,11 +491,12 @@ func _rebuild_queue() -> void:
 		_queue[i] = wanted[i][1]
 
 
-## Grass tufts, collision and mushroom lights all belong to the ground the
-## player is standing on rather than to the view, so they are only built for the
-## chunks close enough to matter.
-func _wants_detail(near: float) -> bool:
-	return near <= detail_range
+## Mushroom lights and collision belong to the ground the player is standing on
+## rather than to the view, so they are only built for the chunks close enough
+## to matter. Everything else a chunk is made of, grass included, comes with the
+## chunk itself.
+func _wants_lights(near: float) -> bool:
+	return near <= light_range
 
 
 func _wants_collision(near: float) -> bool:
@@ -506,16 +510,16 @@ func _pump_jobs() -> void:
 		if _jobs.has(key):
 			continue
 		var near := _chunk_near(key, p)
-		var detail := _wants_detail(near)
+		var lit := _wants_lights(near)
 		var coll := _wants_collision(near)
-		var id := WorkerThreadPool.add_task(_job.bind(key, detail, coll), false, "voxel_chunk")
+		var id := WorkerThreadPool.add_task(_job.bind(key, lit, coll), false, "voxel_chunk")
 		_jobs[key] = id
 
 
-func _job(key: Vector2i, detail: bool, coll: bool) -> void:
-	var res := ChunkBuilder.build(gen, key.x, key.y, detail, coll,
+func _job(key: Vector2i, lit: bool, coll: bool) -> void:
+	var res := ChunkBuilder.build(gen, key.x, key.y, lit, coll,
 		heightmap_collision)
-	res["detail"] = detail
+	res["lit"] = lit
 	res["collision"] = coll
 	_mutex.lock()
 	_done.append(res)
@@ -558,7 +562,7 @@ func _spawn_chunk(key: Vector2i, res: Dictionary) -> Dictionary:
 		"mesh": null,
 		"body": null,
 		"lights": lights,
-		"detail": res["detail"],
+		"lit": res["lit"],
 		"collision": res["collision"],
 		"shadows": shadows,
 	}

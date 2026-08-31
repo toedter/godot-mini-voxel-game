@@ -73,10 +73,13 @@ var _glow_uv := Vector2.ZERO
 ## mushroom is placed, because the meshing pass only sees the material.
 var _glow_phase := {}
 ## Point lights the mushroom caps cast on their surroundings, in chunk local
-## space. Only filled for chunks close enough to the player to get detail.
+## space. Only filled for the chunks close enough to the player for lights.
 var _lights: Array[Dictionary] = []
 
-var _want_detail := false
+## Mushroom lights are real nodes and only the chunks near the player get
+## them. Ground cover is not gated: every chunk grows its own, so that grass is
+## never seen appearing.
+var _want_lights := false
 var _want_collision := true
 ## When set, the ground is not put into the triangle soup at all: the column
 ## heights are handed back instead and the world turns them into a
@@ -86,7 +89,7 @@ var _heightmap_collision := true
 
 
 static func build(gen: TerrainGen, cx: int, cz: int,
-		want_detail: bool, want_collision: bool,
+		want_lights: bool, want_collision: bool,
 		heightmap_collision: bool = true) -> Dictionary:
 	var b := ChunkBuilder.new()
 	b._gen = gen
@@ -94,7 +97,7 @@ static func build(gen: TerrainGen, cx: int, cz: int,
 	b._cz = cz
 	b._ox = cx * CS
 	b._oz = cz * CS
-	b._want_detail = want_detail
+	b._want_lights = want_lights
 	b._want_collision = want_collision
 	b._heightmap_collision = heightmap_collision
 	return b._run()
@@ -456,8 +459,7 @@ func _place_features() -> void:
 					_add_boulder(lx, lz, base_y, rng)
 				"mushroom":
 					_add_mushroom(lx, lz, base_y, rng, fcx, fcz)
-	if _want_detail:
-		_add_ground_cover()
+	_add_ground_cover()
 
 
 func _add_tree(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:
@@ -664,7 +666,7 @@ func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator
 ## records the light, otherwise every neighbour that meshes part of the cap
 ## would add one of its own and the spot would be several times too bright.
 func _add_mushroom_light(cx: int, base_y: int, stem_h: int, cz: int, cap_r: int, phase: float) -> void:
-	if not _want_detail:
+	if not _want_lights:
 		return
 	if cx < 0 or cx >= CS or cz < 0 or cz >= CS:
 		return
@@ -687,26 +689,72 @@ func _put_glow(x: int, y: int, z: int, mat: int, phase: float) -> void:
 		_glow_phase[key] = phase
 
 
-## Small grass tufts / desert pebbles, only generated for nearby chunks.
+## Ground cover: grass and the odd pebble out on the sand.
+##
+## Grass grows in bushes rather than as an even stubble over the whole meadow: a
+## handful of sites per chunk, each a clump of blades tallest in the middle and
+## ragged at the rim. A clump also hides most of its own faces from the mesher,
+## where scattered single tufts each pay for all four sides.
+##
+## That is what pays for the important part: ground cover is built for every
+## chunk in the streamed disc rather than only for the near ones, so grass and
+## pebbles arrive with the chunk they belong to - out in the mist, where a chunk
+## arriving cannot be seen. There is no second radius at which the world grows
+## its detail in front of you.
+##
+## Nothing about that depends on where the player is looking from, either: grass
+## only grows on GRASS and pebbles only on SAND, both of which stop well below
+## Atmosphere's `mist_top`, so ground cover is always in the thickest air there
+## is and always gone by the distance the chunks end - from a summit as much as
+## from the plain.
+##
+## Sites are attempts, not results: one that lands on the wrong material is
+## simply skipped, so a chunk half meadow and half sand gets its share of each.
+const BUSH_SITES := 8
+const PEBBLE_SITES := 10
+
+
 func _add_ground_cover() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = TerrainGen.hash2i(_cx, _cz, _gen.world_seed ^ 0x5eed)
-	for i in 170:
+	for i in BUSH_SITES:
 		var x := rng.randi_range(0, CS - 1)
 		var z := rng.randi_range(0, CS - 1)
-		var m := _m(x, z)
-		var h := _h(x, z)
-		if m == VoxelDefs.GRASS:
-			var n := rng.randi_range(1, 4)
+		if _m(x, z) == VoxelDefs.GRASS:
+			_add_bush(x, z, rng)
+	for i in PEBBLE_SITES:
+		var x := rng.randi_range(0, CS - 1)
+		var z := rng.randi_range(0, CS - 1)
+		if _m(x, z) == VoxelDefs.SAND:
+			_put(x, _h(x, z), z, VoxelDefs.STONE)
+
+
+## One clump of grass. Blades are stacked per column, so the shape is carried by
+## how tall each column is: highest at the centre, one or two voxels out at the
+## rim, and with the rim thinned at random so no two bushes are the same disc.
+func _add_bush(lx: int, lz: int, rng: RandomNumberGenerator) -> void:
+	var r := 1 if rng.randf() < 0.55 else 2
+	var core := rng.randi_range(2, 4)
+	for dz in range(-r, r + 1):
+		for dx in range(-r, r + 1):
+			var d2 := dx * dx + dz * dz
+			if d2 > r * r:
+				continue
+			# The further from the middle, the likelier the column is left out.
+			if d2 > 0 and rng.randf() < 0.22 * float(d2):
+				continue
+			var x := lx + dx
+			var z := lz + dz
+			if x < 0 or x >= CS or z < 0 or z >= CS:
+				continue
+			# A bush stops at the edge of the meadow rather than climbing onto
+			# the sand or the rock next to it.
+			if _m(x, z) != VoxelDefs.GRASS:
+				continue
+			var n := maxi(core - d2 + rng.randi_range(-1, 0), 1)
+			var h := _h(x, z)
 			for k in n:
 				_put(x, h + k, z, VoxelDefs.BLADE)
-			if rng.randf() < 0.35:
-				var ox := rng.randi_range(-1, 1)
-				var oz := rng.randi_range(-1, 1)
-				for k in maxi(n - 1, 1):
-					_put(x + ox, _h(clampi(x + ox, 0, CS - 1), clampi(z + oz, 0, CS - 1)) + k, z + oz, VoxelDefs.BLADE)
-		elif m == VoxelDefs.SAND and rng.randf() < 0.06:
-			_put(x, h, z, VoxelDefs.STONE)
 
 
 func _line(a: Vector3i, b: Vector3i, r: int, mat: int) -> void:
