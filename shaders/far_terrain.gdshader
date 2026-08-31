@@ -5,13 +5,14 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx, fog_disabled;
 //
 // One coarse, flat shaded mesh of the entire world that lies just below the
 // streamed voxel surface. It is what everything past the streamed bubble is
-// made of: the chunks around the player dissolve into it a few dozen metres out
-// and it carries the rest of the island, and the open sea around it, to the
+// made of, and it carries the island, and the open sea around it, to the
 // horizon.
 //
 // It shares voxel_common's haze, so it fades into exactly the same sky colour
-// as everything else; Atmosphere gives it the same reach as the terrain, which
-// opens it up as the player climbs.
+// as everything else and, at the distance the chunks end, is just as thoroughly
+// hidden by the mist as they are. What it is there for is the parts of the
+// world that stand out of the mist: from a summit the peaks across the island
+// rise out of it, and this is what they are made of.
 //
 // The same shader draws the ground and the canopy shell above it. The canopy is
 // dithered away close to the eye, where the streamed chunks have real trees of
@@ -26,10 +27,13 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx, fog_disabled;
 uniform float reflect_max : hint_range(0.0, 1.0) = 0.72;
 
 // Where the canopy shell hands back over to the real trees of the streamed
-// chunks. Measured from voxel_common's `eye_pos`, for the same reason the level
-// handover is: the shadow pass has to drop the same crowns the colour pass
+// chunks. Measured from voxel_common's `eye_pos` rather than from the depth of
+// the fragment, so that the shadow pass drops the same crowns the colour pass
 // does. Left at their defaults nothing is ever dropped, which is what the
 // ground surface wants.
+//
+// VoxelWorld puts this band at the outer edge of the streamed disc, which out
+// on the plain is deep inside the mist and never seen.
 uniform float canopy_begin = -1.0;
 uniform float canopy_end = -1.0;
 

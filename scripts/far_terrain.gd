@@ -20,8 +20,9 @@ extends RefCounted
 ##    with how steeply and how sharply the ground turns there, so the coarse
 ##    surface stays underneath the real one and never pokes through the ground
 ##    in front of the player,
-##  * the chunks dissolve into it (see voxel_common.gdshaderinc) instead of
-##    ending along a hard circle, and
+##  * where the chunks end it is under the same mist they are, so there is no
+##    edge between the two to be seen at all - only ground that stands high
+##    enough to be out of the mist is ever visibly one or the other, and
 ##  * the canopy, a second surface laid over the woods, is dithered away close
 ##    to the eye, where the real trees of the streamed chunks stand.
 ##

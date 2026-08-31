@@ -19,15 +19,16 @@ extends Node3D
 ## checking the rig on a desktop, where nothing drives the camera.
 @export var force_rig: bool = false
 
-## How far each level of detail reaches while in XR. Stereo rendering costs
-## roughly twice as much as the flat view, so every ring is pulled in to hold
-## the headset's framerate.
-@export var xr_lod_ranges: PackedFloat32Array = PackedFloat32Array([20.0, 40.0, 80.0, 160.0, 320.0])
+## How far (m) chunks are streamed while in XR. Stereo rendering costs roughly
+## twice as much as the flat view, and the whole disc is full detail voxels, so
+## it is pulled in to hold the headset's framerate. Atmosphere closes the mist
+## in to match on its own.
+@export_range(24.0, 256.0, 1.0) var xr_view_distance: float = 64.0
 ## SSAO is a full screen effect and gets rendered per eye; off by default in XR.
 @export var xr_disable_ssao: bool = true
-## Cell size (m) of the distant island mesh in XR. Four metres is a quarter of
-## the vertices of the desktop default and still stays under the streamed
-## chunks; the mesh is drawn twice over, so it is worth the coarser ground.
+## Cell size (m) of the distant island mesh in XR. The mesh is drawn twice
+## over, once per eye, so it is worth the coarser ground; it only ever shows
+## through the mist as the peaks across the island anyway.
 @export var xr_far_step: float = 4.0
 ## How far (m) the sun and moon cast in XR. The cascades are rendered per eye,
 ## so the horizon they reach to is pulled in with everything else.
@@ -109,8 +110,8 @@ func _retarget_dependents() -> void:
 
 func _tune_for_xr() -> void:
 	var world := get_node_or_null(world_path)
-	if world != null and "lod_ranges" in world:
-		world.lod_ranges = xr_lod_ranges
+	if world != null and "view_distance" in world:
+		world.view_distance = xr_view_distance
 		# Runs before VoxelWorld is ready, so the distant island is built at
 		# the XR resolution rather than built twice.
 		world.far_step = xr_far_step

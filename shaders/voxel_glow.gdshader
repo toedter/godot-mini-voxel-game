@@ -30,9 +30,6 @@ void vertex() {
 }
 
 void fragment() {
-	if (lod_hidden(v_world)) {
-		discard;
-	}
 	vec4 haze = haze_over(VERTEX, INV_VIEW_MATRIX, v_world.y);
 	vec3 base = voxel_albedo(v_world, v_world_normal, COLOR);
 

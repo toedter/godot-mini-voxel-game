@@ -11,9 +11,6 @@ void vertex() {
 }
 
 void fragment() {
-	if (lod_hidden(v_world)) {
-		discard;
-	}
 	// Scaling the albedo down and adding the haze as emission means the haze is
 	// not affected by lighting: a fully hazed fragment is exactly sky coloured
 	// no matter whether it sits in sunlight or in shadow.

@@ -3,12 +3,19 @@ extends WorldEnvironment
 
 ## Distance haze: how far you can see, and what colour the air is.
 ##
-## The haze used to be a curtain: its range came straight from VoxelWorld's view
-## distance, because the world really did stop there. It no longer does -
-## VoxelWorld streams the world at several levels of detail and backs those with
-## a mesh of the whole island - so how far you can see is authored here
-## (`ground_range`, opening up to `vista_range` as the player climbs) and owes
-## nothing to where one level of detail gives way to the next.
+## The haze is deliberately a curtain. VoxelWorld streams one resolution of
+## voxels out to `view_distance` and nothing beyond it, so the mist is closed in
+## short of that radius: by the time a chunk is loaded or dropped it is behind
+## an opaque wall of air, and the end of the streamed world is never something
+## you can watch happening.
+##
+## The one thing that does reach past the curtain is height. The mist lies on
+## the ground and thins out above `mist_top`, so the peaks across the island -
+## drawn by VoxelWorld's static far terrain mesh, which is hazed by exactly the
+## same air - rise out of it while the plain they stand on is gone after a few
+## dozen metres. Keep `mist_top` near the tree line: below it nothing can be
+## seen at the range where the chunks end, which is what keeps a wood from
+## sprouting into view as it is walked towards.
 ##
 ## The haze also drifts from a cool blue mist over grassland to warm dust over
 ## the desert. The sky's ground hemisphere is retinted to match, otherwise the
@@ -18,8 +25,21 @@ extends WorldEnvironment
 @export var world_path: NodePath = ^"../VoxelWorld"
 @export var player_path: NodePath = ^"../Player"
 @export var sun_path: NodePath = ^"../Sun"
-## Where the haze starts, as a fraction of the guaranteed streamed distance.
-@export_range(0.0, 1.0, 0.01) var haze_begin: float = 0.35
+## Where the haze starts, as a fraction of the distance at which it has closed
+## in completely.
+@export_range(0.0, 1.0, 0.01) var haze_begin: float = 0.3
+## Where the mist goes fully opaque, as a fraction of the radius VoxelWorld
+## streams its chunks to.
+##
+## Short of 1 on purpose. The last stretch of the streamed disc is where a tree
+## whose trunk sits in a chunk that is not loaded yet would be missing its
+## crown, and where the distant island's canopy shell is handing over, so all of
+## that has to be behind opaque air. Raising it towards 1 opens the view and
+## brings those seams closer to visible; lowering it wastes chunks on ground
+## nobody can see.
+@export_range(0.5, 1.0, 0.01) var reach_fraction: float = 0.9
+## Reach (m) used before there is a world to ask.
+@export var fallback_range: float = 86.0
 ## Higher values keep the near range clearer and pack the fade into the
 ## distance.
 @export_range(0.5, 4.0, 0.05) var haze_curve: float = 1.6
@@ -36,28 +56,17 @@ extends WorldEnvironment
 @export var water_color: Color = Color(0.06, 0.28, 0.34)
 @export var water_deep_color: Color = Color(0.02, 0.12, 0.20)
 @export_range(2.0, 60.0, 0.5) var water_visibility: float = 14.0
-## How far (m) you can see standing on the plain. This used to be tied to the
-## streamed chunk radius, because past it the world simply stopped; now that
-## VoxelWorld carries a mesh of the whole island behind the chunks there is
-## something out there to look at, and the haze is free to be a mood rather
-## than a curtain.
-@export_range(40.0, 1200.0, 10.0) var ground_range: float = 250.0
-## How far (m) you can see once you are up on a summit. The haze opens up from
-## `ground_range` to this as the player climbs, and the coarse mesh of the
-## whole island (VoxelWorld's far terrain) is what fills the view up there.
-@export_range(100.0, 2000.0, 10.0) var vista_range: float = 900.0
-## Eye heights (world Y) between which the haze opens up. The island's plain
-## sits at roughly 31 m, the summits reach into the eighties.
-@export var vista_low: float = 42.0
-@export var vista_high: float = 66.0
-## How quickly the view opens up and closes again, in units per second.
-@export_range(0.05, 4.0, 0.05) var vista_speed: float = 0.5
-## The mist lies on the ground. Above this height the air thins out over
-## `mist_depth` metres down to `mist_floor` of its density, which is what makes
-## the mountains stand out of the haze long before the plain around them does.
-@export var mist_top: float = 44.0
-@export var mist_depth: float = 24.0
-@export_range(0.02, 1.0, 0.01) var mist_floor: float = 0.10
+## The mist lies on the ground. Up to this height (world Y) the air is at full
+## thickness, so everything below it is gone by the time the chunks end. The
+## island's plain sits at roughly 31 m, bare rock starts at 48 m and the summits
+## reach into the eighties, so a value just above the tree line hides the woods
+## and lets the peaks through.
+@export var mist_top: float = 50.0
+## Metres over which the air thins out above `mist_top`, down to `mist_floor` of
+## its density. Short, so that the peaks come out of the mist as peaks rather
+## than the whole island slowly surfacing.
+@export var mist_depth: float = 12.0
+@export_range(0.02, 1.0, 0.01) var mist_floor: float = 0.08
 
 var _env: Environment
 var _sky: ProceduralSkyMaterial
@@ -66,7 +75,6 @@ var _player: Node3D
 var _day: DayNight
 var _dust := 0.0
 var _wet := 0.0
-var _vista := 0.0
 
 
 func _ready() -> void:
@@ -91,20 +99,17 @@ func _apply_range() -> void:
 	_push_range()
 
 
-## Under water the haze doubles as the murk: it closes in much sooner and the
-## shaders below tint it green blue, which is what makes being submerged read
-## as being submerged.
+## Everything in the world is hazed over the same reach, chunks and sea plane
+## and distant island alike. That is the whole trick: at the distance the chunks
+## stop, the mesh standing in for them behind is just as thoroughly gone, so
+## there is no edge to catch and no seam to see - only height lifts anything out
+## of it.
 ##
-## Climbing does the opposite: from a summit the haze is pushed back to
-## `vista_range`, which is what turns the streamed bubble around the player into
-## a view over the whole island.
-## The sea plane once had a much longer reach of its own, because it had nothing
-## to hide while the terrain around it stopped after thirty metres. It does not
-## need one any more: everything now fades at the same distance, and where the
-## plane runs out the painted ocean of the island mesh carries on behind it
-## under exactly the same haze.
+## Under water the haze doubles as the murk: it closes in much sooner and the
+## shaders below tint it green blue, which is what makes being submerged read as
+## being submerged.
 func _push_range() -> void:
-	var open: float = lerpf(ground_range, vista_range, _vista)
+	var open := _reach()
 	var reach: float = lerpf(open, minf(water_visibility, open), _wet)
 	for m in _materials():
 		m.set_shader_parameter("haze_begin", reach * lerpf(haze_begin, 0.1, _wet))
@@ -116,6 +121,13 @@ func _push_range() -> void:
 		m.set_shader_parameter("mist_depth", mist_depth)
 		m.set_shader_parameter("mist_floor", lerpf(mist_floor, 1.0, _wet))
 
+
+## Where the mist has closed in completely, in metres: a little short of the
+## radius the chunks are streamed to.
+func _reach() -> float:
+	if _world == null:
+		return fallback_range
+	return _world.view_distance * reach_fraction
 
 
 func _materials() -> Array[ShaderMaterial]:
@@ -133,17 +145,12 @@ func _process(delta: float) -> void:
 	var cam := get_viewport().get_camera_3d()
 	var eye := p + Vector3.UP * 1.6 if cam == null else cam.global_position
 	var eye_y := eye.y
-	# Every handover in the world is measured from the eye, and the shadow pass
-	# has to agree with the colour pass about where that is.
+	# The distant island's canopy hands over at a distance from the eye, and the
+	# shadow pass has to agree with the colour pass about where that is.
 	_world.set_eye(eye)
 	var wet := 1.0 if eye_y < VoxelDefs.SEA_LEVEL else 0.0
 	# Short fade so ducking through the surface is a wipe rather than a snap.
 	_wet = move_toward(_wet, wet, delta * 6.0)
-	# The higher the eye, the further the haze is pushed back. Eased over a
-	# couple of seconds so cresting a ridge opens the view instead of snapping
-	# it, and so a jump does not flick the whole island in and out.
-	var vista := smoothstep(vista_low, vista_high, eye_y)
-	_vista = move_toward(_vista, vista, delta * vista_speed)
 	# The coarse mesh of the island stands in for everything the streamed
 	# chunks cannot reach. Under water it would only show as a false floor a
 	# few metres down, and nothing is visible out there anyway.

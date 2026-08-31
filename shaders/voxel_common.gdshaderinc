@@ -27,6 +27,10 @@ vec3 voxel_albedo(vec3 world, vec3 world_normal, vec4 color) {
 
 // Distance haze.
 //
+// This is also what hides the end of the streamed world: Atmosphere closes it
+// in a little short of the radius VoxelWorld streams chunks to, so a chunk is
+// always loaded and unloaded well behind opaque mist rather than in view.
+//
 // The Environment's own fog fades everything towards a single flat colour, so
 // anything that sticks out above the horizon ends up as a pale silhouette
 // against the blue sky and pops into view the moment its chunk streams in.
@@ -49,64 +53,14 @@ uniform float mist_top = 44.0;
 uniform float mist_depth = 24.0;
 uniform float mist_floor : hint_range(0.02, 1.0) = 0.10;
 
-// Handover between levels of detail.
+// Where the eye is, in world space.
 //
-// Chunks are streamed at several voxel sizes: 10 cm close to the player, then
-// 20, 40, 80 cm further out, and finally the coarse mesh of the whole island.
-// Where two levels meet they are both drawn across a band and dither into one
-// another.
-//
-// The trick that makes the switch hard to catch is that the two sides are
-// exactly complementary. Both work out the same `t` from the same distance and
-// hash the same world cell, and then the finer level drops precisely the cells
-// the coarser one keeps. So no sky is ever visible through the band: every hole
-// one level opens is already filled by the other level's voxels, and what you
-// see is one resolution handing over to another rather than a rim of holes.
-//
-// Distance is measured from `eye_pos` rather than from the fragment's view
-// space depth, so the shadow pass, which renders from the light, drops the same
-// voxels as the colour pass instead of casting the shadows of geometry that was
-// never drawn.
+// Only the distant island's canopy still needs this (see far_terrain.gdshader).
+// It is a uniform rather than the camera position the shader already has so
+// that the shadow pass, which renders from the light, drops exactly the same
+// crowns the colour pass does instead of casting the shadows of geometry that
+// was never drawn.
 uniform vec3 eye_pos = vec3(0.0);
-
-// The band this level fades IN over, where it is the coarser of the pair, and
-// the band it fades OUT over, where it is the finer one. `cell` is the size of
-// the hash cell and has to match on both sides of a band. A band with
-// end <= begin is switched off, which is what the innermost level wants below
-// and the outermost above.
-uniform float fade_in_begin = -1.0;
-uniform float fade_in_end = -1.0;
-uniform float fade_in_cell = 0.4;
-uniform float fade_out_begin = -1.0;
-uniform float fade_out_end = -1.0;
-uniform float fade_out_cell = 0.4;
-
-// True when this fragment belongs to a cell that a neighbouring level is
-// drawing instead.
-bool lod_hidden(vec3 world) {
-	float d = distance(world, eye_pos);
-	if (fade_out_end > fade_out_begin) {
-		float t = smoothstep(fade_out_begin, fade_out_end, d);
-		if (t >= 1.0) {
-			return true;
-		}
-		// The finer side gives up the cells the coarser one has taken over.
-		if (t > 0.0 && hash13(floor(world / max(fade_out_cell, 0.001))) < t) {
-			return true;
-		}
-	}
-	if (fade_in_end > fade_in_begin) {
-		float t = smoothstep(fade_in_begin, fade_in_end, d);
-		if (t <= 0.0) {
-			return true;
-		}
-		// The coarser side takes only the cells the finer one has given up.
-		if (t < 1.0 && hash13(floor(world / max(fade_in_cell, 0.001))) >= t) {
-			return true;
-		}
-	}
-	return false;
-}
 
 // Same gradient as the ProceduralSkyMaterial of the WorldEnvironment.
 vec3 haze_sky(vec3 dir) {
