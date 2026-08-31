@@ -63,9 +63,11 @@ signal world_ready
 ##
 ## The one behavioural difference is that a heightmap interpolates between
 ## column centres, so a voxel step becomes a ramp one voxel wide rather than a
-## hard lip. At 10 cm that is not something you can feel, and Player's
-## `_clamp_to_terrain` still holds the exact voxel height, but turning this off
-## restores the old triangle-per-face ground exactly.
+## hard lip. At 10 cm that is not something you can feel underfoot, but it is
+## the height the player actually rests at: everything that corrects the
+## player's height asks TerrainGen.collision_y() for the ramp, not ground_y()
+## for the lip. Turning this off restores the old triangle-per-face ground, and
+## collision_y then reads half a voxel low on a slope rather than high.
 @export var heightmap_collision: bool = true
 ## Global multiplier for the per-voxel colour variation.
 @export_range(0.0, 3.0, 0.05) var voxel_tint: float = 1.0

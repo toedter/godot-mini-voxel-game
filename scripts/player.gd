@@ -83,6 +83,11 @@ func _physics_process(delta: float) -> void:
 	elif is_on_floor():
 		if Input.is_physical_key_pressed(KEY_SPACE):
 			velocity.y = jump_velocity
+		else:
+			# Standing on the ground is the one state with no vertical motion in
+			# it at all. Leaving whatever the landing or a step up left behind in
+			# velocity.y lets it leak into the floor snap frame after frame.
+			velocity.y = 0.0
 	else:
 		velocity += get_gravity() * delta
 
@@ -139,10 +144,16 @@ func _try_step_up(before: Vector3, motion: Vector3) -> void:
 
 ## Safety net so the player never falls through chunks whose collision shape
 ## has not been streamed in yet.
+##
+## The height it holds is the one the collision shape actually has, ramp and
+## all, and not the voxel lip above it. Held to the lip, this fires on every
+## slope - a few centimetres up each frame, undone by the floor snap on the next
+## one - and that is a bobbing you can see standing still. Held to the collision
+## surface it only ever fires when there really is no ground.
 func _clamp_to_terrain() -> void:
 	if _world == null or _world.gen == null:
 		return
-	var g := _world.gen.ground_y(global_position.x, global_position.z)
+	var g := _world.gen.collision_y(global_position.x, global_position.z)
 	if global_position.y < g:
 		global_position.y = g
 		if velocity.y < 0.0:

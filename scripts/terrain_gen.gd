@@ -352,9 +352,37 @@ func height_at(wx: int, wz: int) -> int:
 	return int(floor(height_meters(float(wx) * VS, float(wz) * VS) / VS))
 
 
-## World-space Y (meters) of the ground surface at a world XZ position.
+## World-space Y (meters) of the ground surface at a world XZ position: the top
+## of the voxel column, which is where the rendered lip is. Anything that has to
+## agree with where the player's feet come to rest wants `collision_y` instead.
 func ground_y(x: float, z: float) -> float:
 	return float(height_at(int(floor(x / VS)), int(floor(z / VS)))) * VS
+
+
+## World-space Y (meters) of the *collision* surface at a world XZ position.
+##
+## The ground is carried by a HeightMapShape3D (see VoxelWorld), whose samples
+## sit at the centres of the rendered columns and which interpolates between
+## them, so a voxel step is a ramp one column wide rather than a hard lip. This
+## reproduces that ramp exactly.
+##
+## The distinction matters to anyone correcting the player's height: measured
+## against `ground_y`, a body resting on the ramp looks up to half a voxel too
+## low on every slope, and lifting it there is a shove the floor snap undoes on
+## the next frame. That fight is felt as a constant bobbing.
+func collision_y(x: float, z: float) -> float:
+	# Sample j of the shape is placed half a voxel along from the column it was
+	# taken at, which lands it on the centre of that column; so the grid node
+	# n sits at world (n + 0.5) * VS.
+	var u := x / VS - 0.5
+	var v := z / VS - 0.5
+	var x0 := int(floor(u))
+	var z0 := int(floor(v))
+	var fx := u - float(x0)
+	var fz := v - float(z0)
+	var h0 := lerpf(float(height_at(x0, z0)), float(height_at(x0 + 1, z0)), fx)
+	var h1 := lerpf(float(height_at(x0, z0 + 1)), float(height_at(x0 + 1, z0 + 1)), fx)
+	return lerpf(h0, h1, fz) * VS
 
 
 ## Whether the ground at this spot lies below the sea surface.
