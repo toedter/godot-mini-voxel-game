@@ -68,6 +68,11 @@ const CRAG_RELIEF := 1.5
 const ROCK_LINE := SEA_LEVEL + 30.0
 const SNOW_LINE := SEA_LEVEL + 48.0
 const ICE_LINE := SEA_LEVEL + 58.0
+## The largest amount `_alpine_jitter` can move any of those three lines: the
+## sum of the two amplitudes it adds, since noise is bounded by 1. Ground more
+## than this below the rock line cannot be alpine whatever the noise says,
+## which is what lets the material pass skip the jitter entirely down there.
+const ALPINE_JITTER_MAX := 4.0 + 1.4
 ## Steepness (height difference in voxels between neighbouring 10 cm columns)
 ## above which a face is treated as a cliff and stays bare rock, and below
 ## which a summit is flat enough to freeze over.
@@ -92,6 +97,9 @@ var _n_mwarp := FastNoiseLite.new()
 
 ## The peaks of the massif: {pos: Vector2, h: float, r: float}.
 var _peaks: Array[Dictionary] = []
+## Distance from the origin past which no peak can possibly reach, so `massif`
+## can answer without sampling anything. Most of the island lies outside it.
+var _massif_reach: float = 0.0
 
 
 func _init(s: int = 1337) -> void:
@@ -188,11 +196,24 @@ func _place_peaks() -> void:
 			"r": lerpf(PEAK_MIN_RADIUS, PEAK_MAX_RADIUS, rand01(i, 13, 0x54)),
 		})
 
+	# The sample point is displaced by up to MOUNTAIN_WARP along each axis
+	# before it is tested, so the displacement vector can be sqrt(2) times that
+	# long. Adding it to the furthest a peak's skirt reaches gives a radius
+	# outside which no warped point can land inside any peak.
+	for p in _peaks:
+		var pos: Vector2 = p["pos"]
+		_massif_reach = maxf(_massif_reach, pos.length() + float(p["r"]))
+	_massif_reach += MOUNTAIN_WARP * sqrt(2.0)
+
 
 ## The massif at this spot: x = the height (m) it adds to the island, y = how
 ## much of the mountain terrain has taken over here, 0 on the plain and 1 near
 ## a summit.
 func massif(mx: float, mz: float) -> Vector2:
+	# Nowhere near the range: no warp, no ridge, no crag. This is the common
+	# case over most of the island and saves four noise samples per column.
+	if mx * mx + mz * mz > _massif_reach * _massif_reach:
+		return Vector2.ZERO
 	# Displacing the sample point bends the outline of every cone, so the range
 	# reads as rock that was pushed up rather than as a pile of smooth hills.
 	var wx := mx + _n_mwarp.get_noise_2d(mx, mz) * MOUNTAIN_WARP
@@ -260,24 +281,44 @@ func land_amount(mx: float, mz: float) -> float:
 
 
 func height_meters(mx: float, mz: float) -> float:
-	var b := biome_at(mx, mz)
+	return height_at_biome(mx, mz, biome_at(mx, mz))
+
+
+## The height field with the biome mask already known.
+##
+## The mask costs three noise samples, and every caller that wants a height
+## wants the mask too - the chunk mesher needs it again to pick the surface
+## material. Taking it as an argument is what lets those callers pay for it
+## once instead of twice; `height_meters` above is the convenience wrapper for
+## everyone who does not care.
+func height_at_biome(mx: float, mz: float, b: float) -> float:
 	var cont := _n_cont.get_noise_2d(mx, mz)
 	var base := LAND_MEAN + cont * 9.0
+	# One sample, used by both biomes below at different weights.
+	var detail := _n_detail.get_noise_2d(mx, mz)
 
-	var hills := _n_hill.get_noise_2d(mx, mz) * 2.6 + _n_detail.get_noise_2d(mx, mz) * 0.5
-	var grass_h := base + hills
-
-	var dune := absf(_n_dune.get_noise_2d(mx, mz))
-	var desert_h := base * 0.92 + 1.5 + dune * 4.5 \
-		+ _n_detail.get_noise_2d(mx, mz) * 0.45 \
-		+ _n_hill.get_noise_2d(mx * 1.7, mz * 1.7) * 0.6
+	# `biome_at` saturates to exactly 0.0 or 1.0 outside its band, which is
+	# where most columns fall, so usually only one of the two profiles has to
+	# be built and the other one's noise is never touched. The lerp is kept for
+	# the border region, where both really are needed.
+	var land_h := 0.0
+	if b <= 0.0:
+		land_h = base + _n_hill.get_noise_2d(mx, mz) * 2.6 + detail * 0.5
+	elif b >= 1.0:
+		land_h = base * 0.92 + 1.5 + absf(_n_dune.get_noise_2d(mx, mz)) * 4.5 \
+			+ detail * 0.45 + _n_hill.get_noise_2d(mx * 1.7, mz * 1.7) * 0.6
+	else:
+		var grass_h := base + _n_hill.get_noise_2d(mx, mz) * 2.6 + detail * 0.5
+		var desert_h := base * 0.92 + 1.5 + absf(_n_dune.get_noise_2d(mx, mz)) * 4.5 \
+			+ detail * 0.45 + _n_hill.get_noise_2d(mx * 1.7, mz * 1.7) * 0.6
+		land_h = lerpf(grass_h, desert_h, b)
 
 	# The hills, dunes and continental swell are only the *relief*; where that
 	# relief sits vertically is decided by the island profile below. Under the
 	# massif the rolling hills are mostly overruled, so the mountains rise from
 	# an even plinth instead of inheriting the swell of the plain.
 	var mnt := massif(mx, mz)
-	var relief := (lerpf(grass_h, desert_h, b) - LAND_MEAN) * (1.0 - 0.75 * mnt.y)
+	var relief := (land_h - LAND_MEAN) * (1.0 - 0.75 * mnt.y)
 
 	var u := shore_u(mx, mz)
 	# Depth profile of the sea bed, in metres below the waterline. It drops
@@ -358,7 +399,17 @@ func ice_line(mx: float, mz: float) -> float:
 ## Shared by the chunk mesher and the distant island mesh so both agree on
 ## where the beach, the rock and the snow line sit.
 func surface_material(mx: float, mz: float, surface: float, slope: int) -> int:
-	var desert := is_desert(mx, mz)
+	return material_from(mx, mz, surface, slope, biome_at(mx, mz),
+		_n_edge.get_noise_2d(mx, mz))
+
+
+## `surface_material` with the two values every caller already has to hand: the
+## biome mask and the fine edge noise, which the beach, the biome decision and
+## the alpine jitter all ride on. Sampling them once instead of five times is
+## most of what the material pass costs.
+func material_from(mx: float, mz: float, surface: float, slope: int,
+		b: float, edge: float) -> int:
+	var desert := b + edge * BIOME_EDGE_JITTER >= 0.5
 	var m := VoxelDefs.SAND if desert else VoxelDefs.GRASS
 	if slope > CLIFF_SLOPE:
 		m = VoxelDefs.STONE
@@ -378,16 +429,74 @@ func surface_material(mx: float, mz: float, surface: float, slope: int) -> int:
 			return VoxelDefs.SAND
 		return m
 
+	# Below the lowest the rock line can ever be jittered to, so the alpine
+	# bands cannot apply however the noise falls. Everything from the beach up
+	# to the foot of the mountains takes this exit without sampling anything.
+	if surface < ROCK_LINE - ALPINE_JITTER_MAX:
+		return m
+
 	# Up on the mountains the soil is gone, then the snow starts and the last
 	# stretch to the summit is iced over. Cliffs stay bare rock all the way up:
-	# nothing settles on a face that steep.
-	if surface < rock_line(mx, mz):
+	# nothing settles on a face that steep. All three lines share one jitter
+	# value, so the ice can never end up outside the snow it sits in.
+	var aj := _n_edge.get_noise_2d(mx * 0.30 + 91.0, mz * 0.30 - 57.0) * 4.0 + edge * 1.4
+	if surface < ROCK_LINE + aj:
 		return m
-	if slope > CLIFF_SLOPE or surface < snow_line(mx, mz):
+	if slope > CLIFF_SLOPE or surface < SNOW_LINE + aj:
 		return VoxelDefs.STONE
-	if surface >= ice_line(mx, mz) and slope <= ICE_SLOPE:
+	if surface >= ICE_LINE + aj * 0.6 and slope <= ICE_SLOPE:
 		return VoxelDefs.ICE
 	return VoxelDefs.SNOW
+
+
+## Fills a chunk's height and material grids in one pass.
+##
+## The two used to be two loops of `height_meters` / `surface_material`, which
+## sampled the biome mask twice per column and the alpine jitter up to three
+## times. Doing both here lets every shared value be computed once, and lets
+## the material pass skip the one voxel margin, which only the heights need.
+##
+## `out_heights` is `ms * ms` entries covering lx, lz in -1 .. cs, row major
+## with a stride of `ms`. `out_mats` uses the same indexing but only the
+## interior is written. TerrainGen is shared between the worker threads, so
+## everything here stays on the stack.
+func sample_chunk(ox: int, oz: int, vs: float, cs: int,
+		out_heights: PackedInt32Array, out_mats: PackedByteArray) -> void:
+	var ms := cs + 2
+	out_heights.resize(ms * ms)
+	out_mats.resize(ms * ms)
+	# Held over from the height pass so the material pass does not resample.
+	var biome := PackedFloat32Array()
+	var edges := PackedFloat32Array()
+	biome.resize(ms * ms)
+	edges.resize(ms * ms)
+
+	var inv_vs := 1.0 / vs
+	var i := 0
+	for lz in range(-1, cs + 1):
+		var mz := float(oz + lz) * vs
+		for lx in range(-1, cs + 1):
+			var mx := float(ox + lx) * vs
+			var b := biome_at(mx, mz)
+			biome[i] = b
+			edges[i] = _n_edge.get_noise_2d(mx, mz)
+			out_heights[i] = int(floor(height_at_biome(mx, mz, b) * inv_vs))
+			i += 1
+
+	# Materials are only ever read for the interior, so the margin ring is left
+	# alone. The slope still looks at it, which is why the heights above are not.
+	for lz in cs:
+		var mz := float(oz + lz) * vs
+		var row := (lz + 1) * ms
+		for lx in cs:
+			var j := row + lx + 1
+			var h := out_heights[j]
+			var slope := absi(h - out_heights[j - 1])
+			slope = maxi(slope, absi(h - out_heights[j + 1]))
+			slope = maxi(slope, absi(h - out_heights[j - ms]))
+			slope = maxi(slope, absi(h - out_heights[j + ms]))
+			out_mats[j] = material_from(float(ox + lx) * vs, mz,
+				float(h) * vs, slope, biome[j], edges[j])
 
 
 ## Roughly how much of the ground here is under a canopy, 0 to 1. The distant

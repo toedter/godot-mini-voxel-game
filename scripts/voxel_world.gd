@@ -38,6 +38,21 @@ signal world_ready
 @export_range(0.0, 100.0, 1.0) var collision_range: float = 19.2
 @export var max_parallel_jobs: int = 6
 @export var chunks_per_frame: int = 4
+## Coarsest level that still casts into the sun's shadow cascades. Past a
+## couple of rings a chunk's own shadow is a few pixels of cascade that nobody
+## can pick out, but it still costs a full extra draw of its geometry.
+@export_range(-1, 8, 1) var shadow_lod_max: int = 1
+## Carry the ground in a HeightMapShape3D instead of putting its triangles into
+## the collision soup. The shape is built from the column heights the mesher
+## already has, needs no BVH, and leaves the soup with nothing but the trees
+## and boulders.
+##
+## The one behavioural difference is that a heightmap interpolates between
+## column centres, so a voxel step becomes a ramp one voxel wide rather than a
+## hard lip. At 10 cm that is not something you can feel, and Player's
+## `_clamp_to_terrain` still holds the exact voxel height, but turning this off
+## restores the old triangle-per-face ground exactly.
+@export var heightmap_collision: bool = true
 ## Global multiplier for the per-voxel colour variation.
 @export_range(0.0, 3.0, 0.05) var voxel_tint: float = 1.0
 ## Peak sway of a grass tuft in metres, and how fast the wind travels.
@@ -94,7 +109,22 @@ var _far_job: int = -1
 var _far_tiles: Array = []
 var _far_built := false
 ## All keyed by Vector3i(chunk x, chunk z, level).
-var _chunks := {} # -> Dictionary {node, detail, collision}
+##
+## A chunk is not a node. Its mesh is a bare RenderingServer instance, which is
+## all a static lump of geometry needs and skips the scene tree entirely; only
+## the few chunks that carry collision or mushroom lights own real nodes. The
+## entry holds {inst, mesh, body, lights, detail, collision} - `mesh` is kept
+## purely to hold a reference, since freeing the ArrayMesh would take its RID
+## out from under the instance.
+var _chunks := {}
+## Collision bodies of unloaded chunks, kept in the tree with their shapes
+## cleared and handed straight back out when a chunk needs one. These are the
+## nearest chunks, so they are also the ones that churn most as the player
+## walks.
+var _body_pool: Array[StaticBody3D] = []
+const BODY_POOL_MAX := 64
+## Stride of the mesher's height grid: the chunk plus a one column margin.
+const HM_STRIDE := VoxelDefs.CHUNK_SIZE + 2
 var _jobs := {} # -> task id
 var _queue: Array[Vector3i] = []
 var _done: Array = []
@@ -386,6 +416,14 @@ func _exit_tree() -> void:
 	if _far_job >= 0:
 		WorkerThreadPool.wait_for_task_completion(_far_job)
 		_far_job = -1
+	# Render instances live in the server, not in the tree, so nothing frees
+	# them on our behalf, and the meshes they point at are only held by the
+	# chunk entries.
+	for info in _chunks.values():
+		_drop_chunk(info)
+	_chunks.clear()
+	_body_pool.clear()
+	_mushroom_lights.clear()
 
 
 func _spawn_player() -> void:
@@ -492,7 +530,12 @@ func _chunk_gap(key: Vector3i, p: Vector2) -> Vector2:
 
 func _rebuild_queue() -> void:
 	var p := _eye_xz()
-	var wanted: Array[Vector3i] = []
+	# Entries are [level, distance, key]. The distance is the one already
+	# worked out to decide whether the chunk is wanted at all, so sorting on it
+	# is free; the comparator used to call _chunk_gap twice per comparison,
+	# which over five levels of ring is thousands of square roots per boundary
+	# the player crosses.
+	var wanted: Array = []
 	for lod in lod_count():
 		var m := chunk_meters(lod)
 		var outer := lod_outer(lod)
@@ -515,16 +558,19 @@ func _rebuild_queue() -> void:
 					# upgrade a chunk that came into the detail / collision range
 					var info: Dictionary = _chunks[key]
 					if (_wants_detail(key, gap.x) and not info["detail"]) 							or (_wants_collision(key, gap.x) and not info["collision"]):
-						wanted.append(key)
+						wanted.append([lod, gap.x, key])
 					continue
-				wanted.append(key)
+				wanted.append([lod, gap.x, key])
 	# Finest level first, and nearest first inside a level, so the ground the
 	# player is standing on is there before the horizon is.
-	wanted.sort_custom(func(a: Vector3i, b: Vector3i) -> bool:
-		if a.z != b.z:
-			return a.z < b.z
-		return _chunk_gap(a, p).x < _chunk_gap(b, p).x)
-	_queue = wanted
+	wanted.sort_custom(func(a: Array, b: Array) -> bool:
+		if a[0] != b[0]:
+			return a[0] < b[0]
+		return a[1] < b[1])
+	_queue.clear()
+	_queue.resize(wanted.size())
+	for i in wanted.size():
+		_queue[i] = wanted[i][2]
 
 
 ## Grass tufts, collision and mushroom lights are all level 0 only: nothing
@@ -551,7 +597,8 @@ func _pump_jobs() -> void:
 
 
 func _job(key: Vector3i, detail: bool, coll: bool) -> void:
-	var res := ChunkBuilder.build(gen, key.x, key.y, key.z, detail, coll)
+	var res := ChunkBuilder.build(gen, key.x, key.y, key.z, detail, coll,
+		heightmap_collision)
 	res["detail"] = detail
 	res["collision"] = coll
 	_mutex.lock()
@@ -574,30 +621,34 @@ func _integrate_results() -> void:
 			WorkerThreadPool.wait_for_task_completion(_jobs[key])
 			_jobs.erase(key)
 		if _chunks.has(key):
-			var old: Dictionary = _chunks[key]
-			if is_instance_valid(old["node"]):
-				old["node"].queue_free()
+			_drop_chunk(_chunks[key])
 			_chunks.erase(key)
 		if _chunk_gap(key, p).x > lod_outer(key.z):
 			continue
-		var node := _spawn_chunk(key, res)
-		_chunks[key] = {"node": node, "detail": res["detail"], "collision": res["collision"]}
+		_chunks[key] = _spawn_chunk(key, res)
 
 	if not _spawned and _jobs.is_empty() and _queue.is_empty():
 		_spawned = true
 		world_ready.emit()
 
 
-func _spawn_chunk(key: Vector3i, res: Dictionary) -> Node3D:
+func _spawn_chunk(key: Vector3i, res: Dictionary) -> Dictionary:
 	var m := chunk_meters(key.z)
-	var root := Node3D.new()
-	root.name = "Chunk_%d_%d_L%d" % [key.x, key.y, key.z]
-	root.position = Vector3(float(key.x) * m, 0.0, float(key.y) * m)
-	add_child(root)
-	if res["mesh"] != null:
-		var mi := MeshInstance3D.new()
-		var mesh: ArrayMesh = res["mesh"]
-		mi.mesh = mesh
+	var origin := Vector3(float(key.x) * m, 0.0, float(key.y) * m)
+	var lights: Array[OmniLight3D] = []
+	var info := {
+		"inst": RID(),
+		"mesh": null,
+		"body": null,
+		"lights": lights,
+		"detail": res["detail"],
+		"collision": res["collision"],
+	}
+
+	var mesh: ArrayMesh = res["mesh"]
+	if mesh != null:
+		var inst := RenderingServer.instance_create2(mesh.get_rid(), get_world_3d().scenario)
+		RenderingServer.instance_set_transform(inst, Transform3D(Basis(), origin))
 		var sway_surface: int = res.get("sway_surface", -1)
 		var glow_surface: int = res.get("glow_surface", -1)
 		for s in mesh.get_surface_count():
@@ -606,21 +657,49 @@ func _spawn_chunk(key: Vector3i, res: Dictionary) -> Node3D:
 				mat = _grass_material
 			elif s == glow_surface:
 				mat = _glow_materials[key.z]
-			mi.set_surface_override_material(s, mat)
+			RenderingServer.instance_set_surface_override_material(inst, s, mat.get_rid())
 		if sway_surface >= 0:
 			# the wind pushes grass a few centimetres outside the baked AABB
-			mi.extra_cull_margin = 0.25
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		root.add_child(mi)
-	if res["shape"] != null:
-		var body := StaticBody3D.new()
-		var cs := CollisionShape3D.new()
-		cs.shape = res["shape"]
-		body.add_child(cs)
-		root.add_child(body)
+			RenderingServer.instance_set_extra_visibility_margin(inst, 0.25)
+		RenderingServer.instance_geometry_set_cast_shadows_setting(inst,
+			RenderingServer.SHADOW_CASTING_SETTING_ON if key.z <= shadow_lod_max
+			else RenderingServer.SHADOW_CASTING_SETTING_OFF)
+		info["inst"] = inst
+		# The instance holds only the mesh's RID, so something has to keep the
+		# ArrayMesh itself alive for as long as the instance is up.
+		info["mesh"] = mesh
+
+	var heights = res.get("heights")
+	var soup: ConcavePolygonShape3D = res["shape"]
+	if heights != null or soup != null:
+		var body := _acquire_body()
+		body.position = origin
+		var vs := VoxelDefs.VOXEL_SIZE * float(1 << key.z)
+		var ground := body.get_child(0) as CollisionShape3D
+		if heights != null:
+			var hs := HeightMapShape3D.new()
+			hs.map_width = HM_STRIDE
+			hs.map_depth = HM_STRIDE
+			hs.map_data = heights
+			ground.shape = hs
+			# The samples are the columns' centres and the grid carries a
+			# margin column on each side, so it runs from -0.5 to CS + 0.5
+			# voxels. Godot centres a heightmap on its own origin, hence the
+			# half chunk offset; the data is in voxels, hence the scale.
+			ground.position = Vector3(32.0 * vs, 0.0, 32.0 * vs)
+			ground.scale = Vector3(vs, vs, vs)
+			ground.disabled = false
+		var feats := body.get_child(1) as CollisionShape3D
+		if soup != null:
+			feats.shape = soup
+			feats.disabled = false
+		info["body"] = body
+
 	for spec in res.get("lights", []):
 		var light := OmniLight3D.new()
-		light.position = spec["pos"]
+		# No chunk node to parent to any more, so the light is placed straight
+		# into world space.
+		light.position = origin + spec["pos"]
 		light.omni_range = spec["radius"]
 		light.light_color = glow_color
 		# Shadows would cost far more than they add for a soft glow that sits
@@ -630,9 +709,59 @@ func _spawn_chunk(key: Vector3i, res: Dictionary) -> Node3D:
 		light.visible = false
 		light.set_meta("base_energy", spec["energy"])
 		light.set_meta("phase", spec["phase"])
-		root.add_child(light)
+		add_child(light)
+		lights.append(light)
 		_mushroom_lights.append(light)
-	return root
+	return info
+
+
+## Tears a chunk down: the render instance goes back to the server, the
+## collision body to the pool, the lights to the tree.
+func _drop_chunk(info: Dictionary) -> void:
+	var inst: RID = info["inst"]
+	if inst.is_valid():
+		RenderingServer.free_rid(inst)
+	info["inst"] = RID()
+	info["mesh"] = null
+	var body: StaticBody3D = info["body"]
+	if body != null and is_instance_valid(body):
+		_release_body(body)
+	info["body"] = null
+	for l in info["lights"]:
+		if is_instance_valid(l):
+			l.queue_free()
+	info["lights"] = []
+
+
+## A body with its two shape slots ready: the ground heightmap and the feature
+## triangle soup.
+func _acquire_body() -> StaticBody3D:
+	if not _body_pool.is_empty():
+		return _body_pool.pop_back()
+	var body := StaticBody3D.new()
+	var ground := CollisionShape3D.new()
+	ground.name = "Ground"
+	ground.disabled = true
+	body.add_child(ground)
+	var feats := CollisionShape3D.new()
+	feats.name = "Features"
+	feats.disabled = true
+	body.add_child(feats)
+	add_child(body)
+	return body
+
+
+func _release_body(body: StaticBody3D) -> void:
+	for c in body.get_children():
+		var cs := c as CollisionShape3D
+		cs.disabled = true
+		cs.shape = null
+		cs.position = Vector3.ZERO
+		cs.scale = Vector3.ONE
+	if _body_pool.size() < BODY_POOL_MAX:
+		_body_pool.append(body)
+	else:
+		body.queue_free()
 
 
 ## Drops chunks that have fallen out of their level's ring, with one chunk of
@@ -647,9 +776,7 @@ func _unload_far() -> void:
 		if gap.x > lod_outer(key.z) + slack or gap.y < lod_inner(key.z) - slack:
 			drop.append(key)
 	for key in drop:
-		var info: Dictionary = _chunks[key]
-		if is_instance_valid(info["node"]):
-			info["node"].queue_free()
+		_drop_chunk(_chunks[key])
 		_chunks.erase(key)
 
 

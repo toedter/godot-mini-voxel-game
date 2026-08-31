@@ -30,11 +30,9 @@ enabled=PackedStringArray("res://addons/godot-xr-development-kit/plugin.cfg")
 [rendering]
 
 renderer/rendering_method.mobile="gl_compatibility"
-anti_aliasing/quality/msaa_3d=2
-; The sun now reaches a couple of hundred metres, so its cascades need
-; more atlas to stay crisp. The compatibility / XR path keeps the default.
 lights_and_shadows/directional_shadow/size=8192
 lights_and_shadows/directional_shadow/size.mobile=4096
+anti_aliasing/quality/msaa_3d=2
 
 [xr]
 

@@ -14,6 +14,20 @@ extends RefCounted
 ## night.
 
 const CS := VoxelDefs.CHUNK_SIZE
+
+## Feature voxels are held in a dictionary keyed by a packed integer rather
+## than by a Vector3i. A Vector3i key allocates a variant and hashes three
+## components on every read and write, and the blob fills below do hundreds of
+## thousands of them per chunk; an int key is a plain machine word. X and Z are
+## bounded by the chunk, Y only by the world, so Y gets the low bits and the
+## other two are shifted clear of it.
+const KEY_X := 21
+const KEY_Z := 27
+const KEY_Y_MASK := (1 << KEY_X) - 1
+const KEY_XY := 63 # mask for a packed X or Z once shifted down
+## Steps from one packed key to the neighbouring voxel.
+const KEY_DX := 1 << KEY_X
+const KEY_DZ := 1 << KEY_Z
 ## Edge length (m) of a voxel at the finest level. Feature dimensions and the
 ## coordinates the terrain generator hands out are all counted in these.
 const FINE_VS := VoxelDefs.VOXEL_SIZE
@@ -38,7 +52,7 @@ var _vs: float = VoxelDefs.VOXEL_SIZE
 
 var _heights := PackedInt32Array()
 var _mats := PackedByteArray()
-var _extras := {} # Vector3i (local voxel) -> material
+var _extras := {} # packed local voxel key -> material
 
 var _verts := PackedVector3Array()
 var _norms := PackedVector3Array()
@@ -67,7 +81,7 @@ var _glow_uvs := PackedVector2Array()
 var _glow_idx := PackedInt32Array()
 var _glow := false
 var _glow_uv := Vector2.ZERO
-## Local voxel -> phase of the mushroom it belongs to. Written while the
+## Packed voxel key -> phase of the mushroom it belongs to. Written while the
 ## mushroom is placed, because the meshing pass only sees the material.
 var _glow_phase := {}
 ## Point lights the mushroom caps cast on their surroundings, in chunk local
@@ -76,12 +90,18 @@ var _lights: Array[Dictionary] = []
 
 var _want_detail := false
 var _want_collision := true
+## When set, the ground is not put into the triangle soup at all: the column
+## heights are handed back instead and the world turns them into a
+## HeightMapShape3D, which costs nothing to build and needs no BVH. Only the
+## features still need real triangles.
+var _heightmap_collision := true
 
 
 ## `lod` is the level of detail: 0 is full 10 cm voxels, each step up doubles
 ## the voxel size and so the ground one chunk covers.
 static func build(gen: TerrainGen, cx: int, cz: int, lod: int,
-		want_detail: bool, want_collision: bool) -> Dictionary:
+		want_detail: bool, want_collision: bool,
+		heightmap_collision: bool = true) -> Dictionary:
 	var b := ChunkBuilder.new()
 	b._gen = gen
 	b._cx = cx
@@ -93,6 +113,7 @@ static func build(gen: TerrainGen, cx: int, cz: int, lod: int,
 	b._oz = cz * CS
 	b._want_detail = want_detail
 	b._want_collision = want_collision
+	b._heightmap_collision = heightmap_collision
 	return b._run()
 
 
@@ -103,7 +124,18 @@ func _run() -> Dictionary:
 	_mesh_terrain_sides()
 	_mesh_features()
 
-	var result := {"cx": _cx, "cz": _cz, "lod": _lod, "mesh": null, "shape": null, "lights": _lights}
+	var result := {"cx": _cx, "cz": _cz, "lod": _lod, "mesh": null, "shape": null,
+		"heights": null, "lights": _lights}
+	if _want_collision and _heightmap_collision:
+		# The grid the shape wants is exactly the one already sampled, margin
+		# included: MS by MS, row major, in voxels. The margin is what makes
+		# neighbouring chunks overlap by a column instead of leaving a seam the
+		# player could catch a foot in.
+		var hm := PackedFloat32Array()
+		hm.resize(MS * MS)
+		for i in MS * MS:
+			hm[i] = float(_heights[i])
+		result["heights"] = hm
 	var mesh: ArrayMesh = null
 	if not _verts.is_empty():
 		var arrays := []
@@ -151,32 +183,7 @@ func _run() -> Dictionary:
 # --------------------------------------------------------------------------
 
 func _sample_columns() -> void:
-	_heights.resize(MS * MS)
-	_mats.resize(MS * MS)
-
-	for lz in range(-1, CS + 1):
-		for lx in range(-1, CS + 1):
-			var i := (lz + 1) * MS + (lx + 1)
-			var mx := float(_ox + lx) * _vs
-			var mz := float(_oz + lz) * _vs
-			_heights[i] = int(floor(_gen.height_meters(mx, mz) / _vs))
-
-	for lz in range(-1, CS + 1):
-		for lx in range(-1, CS + 1):
-			var i := (lz + 1) * MS + (lx + 1)
-			var h := _heights[i]
-			var slope := 0
-			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx - 1, lz)]))
-			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx + 1, lz)]))
-			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz - 1)]))
-			slope = maxi(slope, absi(h - _heights[_clamp_idx(lx, lz + 1)]))
-			var mx := float(_ox + lx) * _vs
-			var mz := float(_oz + lz) * _vs
-			_mats[i] = _gen.surface_material(mx, mz, float(h) * _vs, slope)
-
-
-func _clamp_idx(lx: int, lz: int) -> int:
-	return (clampi(lz, -1, CS) + 1) * MS + (clampi(lx, -1, CS) + 1)
+	_gen.sample_chunk(_ox, _oz, _vs, CS, _heights, _mats)
 
 
 func _h(lx: int, lz: int) -> int:
@@ -193,69 +200,91 @@ func _m(lx: int, lz: int) -> int:
 
 ## Emits a quad. Corners must be given counter-clockwise as seen from `n`;
 ## Godot's front faces are clockwise, so the indices are reversed here.
+## Every array here grows by a fixed amount per quad, so each one is resized
+## once and then written by index. `push_back` on a packed array re-checks and
+## grows its buffer on every single call, and this is the busiest function in
+## the builder.
 func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Color, collide: bool) -> void:
 	if _sway:
 		var s := _sway_verts.size()
-		_sway_verts.push_back(a)
-		_sway_verts.push_back(b)
-		_sway_verts.push_back(c)
-		_sway_verts.push_back(d)
+		var si := _sway_idx.size()
+		_sway_verts.resize(s + 4)
+		_sway_norms.resize(s + 4)
+		_sway_cols.resize(s + 4)
+		_sway_uvs.resize(s + 4)
+		_sway_idx.resize(si + 6)
+		_sway_verts[s] = a
+		_sway_verts[s + 1] = b
+		_sway_verts[s + 2] = c
+		_sway_verts[s + 3] = d
 		for k in 4:
-			_sway_norms.push_back(n)
-			_sway_cols.push_back(col)
-			_sway_uvs.push_back(_sway_uv)
-		_sway_idx.push_back(s)
-		_sway_idx.push_back(s + 2)
-		_sway_idx.push_back(s + 1)
-		_sway_idx.push_back(s)
-		_sway_idx.push_back(s + 3)
-		_sway_idx.push_back(s + 2)
+			_sway_norms[s + k] = n
+			_sway_cols[s + k] = col
+			_sway_uvs[s + k] = _sway_uv
+		_sway_idx[si] = s
+		_sway_idx[si + 1] = s + 2
+		_sway_idx[si + 2] = s + 1
+		_sway_idx[si + 3] = s
+		_sway_idx[si + 4] = s + 3
+		_sway_idx[si + 5] = s + 2
 		return
 	if _glow:
 		var g := _glow_verts.size()
-		_glow_verts.push_back(a)
-		_glow_verts.push_back(b)
-		_glow_verts.push_back(c)
-		_glow_verts.push_back(d)
+		var gi := _glow_idx.size()
+		_glow_verts.resize(g + 4)
+		_glow_norms.resize(g + 4)
+		_glow_cols.resize(g + 4)
+		_glow_uvs.resize(g + 4)
+		_glow_idx.resize(gi + 6)
+		_glow_verts[g] = a
+		_glow_verts[g + 1] = b
+		_glow_verts[g + 2] = c
+		_glow_verts[g + 3] = d
 		for k in 4:
-			_glow_norms.push_back(n)
-			_glow_cols.push_back(col)
-			_glow_uvs.push_back(_glow_uv)
-		_glow_idx.push_back(g)
-		_glow_idx.push_back(g + 2)
-		_glow_idx.push_back(g + 1)
-		_glow_idx.push_back(g)
-		_glow_idx.push_back(g + 3)
-		_glow_idx.push_back(g + 2)
+			_glow_norms[g + k] = n
+			_glow_cols[g + k] = col
+			_glow_uvs[g + k] = _glow_uv
+		_glow_idx[gi] = g
+		_glow_idx[gi + 1] = g + 2
+		_glow_idx[gi + 2] = g + 1
+		_glow_idx[gi + 3] = g
+		_glow_idx[gi + 4] = g + 3
+		_glow_idx[gi + 5] = g + 2
 		if collide and _want_collision:
-			_col_faces.push_back(a)
-			_col_faces.push_back(c)
-			_col_faces.push_back(b)
-			_col_faces.push_back(a)
-			_col_faces.push_back(d)
-			_col_faces.push_back(c)
+			_collide_quad(a, b, c, d)
 		return
 	var base := _verts.size()
-	_verts.push_back(a)
-	_verts.push_back(b)
-	_verts.push_back(c)
-	_verts.push_back(d)
+	var bi := _idx.size()
+	_verts.resize(base + 4)
+	_norms.resize(base + 4)
+	_cols.resize(base + 4)
+	_idx.resize(bi + 6)
+	_verts[base] = a
+	_verts[base + 1] = b
+	_verts[base + 2] = c
+	_verts[base + 3] = d
 	for k in 4:
-		_norms.push_back(n)
-		_cols.push_back(col)
-	_idx.push_back(base)
-	_idx.push_back(base + 2)
-	_idx.push_back(base + 1)
-	_idx.push_back(base)
-	_idx.push_back(base + 3)
-	_idx.push_back(base + 2)
+		_norms[base + k] = n
+		_cols[base + k] = col
+	_idx[bi] = base
+	_idx[bi + 1] = base + 2
+	_idx[bi + 2] = base + 1
+	_idx[bi + 3] = base
+	_idx[bi + 4] = base + 3
+	_idx[bi + 5] = base + 2
 	if collide and _want_collision:
-		_col_faces.push_back(a)
-		_col_faces.push_back(c)
-		_col_faces.push_back(b)
-		_col_faces.push_back(a)
-		_col_faces.push_back(d)
-		_col_faces.push_back(c)
+		_collide_quad(a, b, c, d)
+
+
+func _collide_quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+	var f := _col_faces.size()
+	_col_faces.resize(f + 6)
+	_col_faces[f] = a
+	_col_faces[f + 1] = c
+	_col_faces[f + 2] = b
+	_col_faces[f + 3] = a
+	_col_faces[f + 4] = d
+	_col_faces[f + 5] = c
 
 
 # --------------------------------------------------------------------------
@@ -263,30 +292,41 @@ func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Colo
 # --------------------------------------------------------------------------
 
 func _mesh_terrain_top() -> void:
+	# The ground only goes into the collision triangle soup when the cheaper
+	# heightmap shape is not carrying it.
+	var soup := not _heightmap_collision
 	var used := PackedByteArray()
 	used.resize(CS * CS)
+	# The row bases are hoisted and the grids indexed directly: `_h` / `_m` are
+	# one array read each, but they were being reached through a function call
+	# from the innermost loop of the greedy merge.
 	for z in CS:
+		var hrow := (z + 1) * MS + 1
+		var urow := z * CS
 		for x in CS:
-			if used[z * CS + x] != 0:
+			if used[urow + x] != 0:
 				continue
-			var h := _h(x, z)
-			var m := _m(x, z)
+			var h := _heights[hrow + x]
+			var m := _mats[hrow + x]
 			var w := 1
-			while x + w < CS and used[z * CS + x + w] == 0 and _h(x + w, z) == h and _m(x + w, z) == m:
+			while x + w < CS and used[urow + x + w] == 0 					and _heights[hrow + x + w] == h and _mats[hrow + x + w] == m:
 				w += 1
 			var d := 1
 			while z + d < CS:
 				var ok := true
+				var hrow_d := hrow + d * MS
+				var urow_d := urow + d * CS
 				for i in w:
-					if used[(z + d) * CS + x + i] != 0 or _h(x + i, z + d) != h or _m(x + i, z + d) != m:
+					if used[urow_d + x + i] != 0 or _heights[hrow_d + x + i] != h 							or _mats[hrow_d + x + i] != m:
 						ok = false
 						break
 				if not ok:
 					break
 				d += 1
 			for dz in d:
+				var urow_f := urow + dz * CS
 				for dx in w:
-					used[(z + dz) * CS + x + dx] = 1
+					used[urow_f + x + dx] = 1
 
 			var y := float(h) * _vs
 			var x0 := float(x) * _vs
@@ -295,24 +335,32 @@ func _mesh_terrain_top() -> void:
 			var z1 := float(z + d) * _vs
 			_quad(
 				Vector3(x0, y, z0), Vector3(x0, y, z1), Vector3(x1, y, z1), Vector3(x1, y, z0),
-				Vector3.UP, VoxelDefs.color_of(m), true)
+				Vector3.UP, VoxelDefs.color_of(m), soup)
 
 
 func _mesh_terrain_sides() -> void:
+	var soup := not _heightmap_collision
 	# +X / -X : runs merge along Z
 	for x in CS:
-		for dir in [1, -1]:
+		for dir: int in [1, -1]:
+			# Both columns of this run sit at fixed grid columns; only the row
+			# advances, so the index walks by one stride per step.
+			var xc := x + 1
+			var xn := x + dir + 1
 			var z := 0
 			while z < CS:
-				var h := _h(x, z)
-				var nh := _h(x + dir, z)
+				var ri := (z + 1) * MS
+				var h := _heights[ri + xc]
+				var nh := _heights[ri + xn]
 				if h <= nh:
 					z += 1
 					continue
-				var m := _m(x, z)
+				var m := _mats[ri + xc]
 				var run := 1
-				while z + run < CS and _h(x, z + run) == h and _h(x + dir, z + run) == nh and _m(x, z + run) == m:
+				var rr := ri + MS
+				while z + run < CS and _heights[rr + xc] == h and _heights[rr + xn] == nh 						and _mats[rr + xc] == m:
 					run += 1
+					rr += MS
 				var px := float(x + (1 if dir > 0 else 0)) * _vs
 				var z0 := float(z) * _vs
 				var z1 := float(z + run) * _vs
@@ -322,25 +370,28 @@ func _mesh_terrain_sides() -> void:
 					var col: Color = band[2]
 					if dir > 0:
 						_quad(Vector3(px, y0, z1), Vector3(px, y0, z0), Vector3(px, y1, z0), Vector3(px, y1, z1),
-							Vector3.RIGHT, col, true)
+							Vector3.RIGHT, col, soup)
 					else:
 						_quad(Vector3(px, y0, z0), Vector3(px, y0, z1), Vector3(px, y1, z1), Vector3(px, y1, z0),
-							Vector3.LEFT, col, true)
+							Vector3.LEFT, col, soup)
 				z += run
 
 	# +Z / -Z : runs merge along X
 	for z in CS:
-		for dir in [1, -1]:
+		for dir: int in [1, -1]:
+			# Here it is the rows that are fixed and the column that advances.
+			var rz := (z + 1) * MS + 1
+			var rn := (z + dir + 1) * MS + 1
 			var x := 0
 			while x < CS:
-				var h := _h(x, z)
-				var nh := _h(x, z + dir)
+				var h := _heights[rz + x]
+				var nh := _heights[rn + x]
 				if h <= nh:
 					x += 1
 					continue
-				var m := _m(x, z)
+				var m := _mats[rz + x]
 				var run := 1
-				while x + run < CS and _h(x + run, z) == h and _h(x + run, z + dir) == nh and _m(x + run, z) == m:
+				while x + run < CS and _heights[rz + x + run] == h 						and _heights[rn + x + run] == nh and _mats[rz + x + run] == m:
 					run += 1
 				var pz := float(z + (1 if dir > 0 else 0)) * _vs
 				var x0 := float(x) * _vs
@@ -351,10 +402,10 @@ func _mesh_terrain_sides() -> void:
 					var col: Color = band[2]
 					if dir > 0:
 						_quad(Vector3(x0, y0, pz), Vector3(x1, y0, pz), Vector3(x1, y1, pz), Vector3(x0, y1, pz),
-							Vector3.BACK, col, true)
+							Vector3.BACK, col, soup)
 					else:
 						_quad(Vector3(x1, y0, pz), Vector3(x0, y0, pz), Vector3(x0, y1, pz), Vector3(x1, y1, pz),
-							Vector3.FORWARD, col, true)
+							Vector3.FORWARD, col, soup)
 				x += run
 
 
@@ -405,21 +456,29 @@ func _to_local(fine: int, origin: int) -> int:
 	return int(floor(float(fine) * FINE_VS / _vs)) - origin
 
 
-func _put(x: int, y: int, z: int, mat: int) -> void:
+## Returns the packed key the voxel was stored under, or -1 if it fell outside
+## the chunk or inside the terrain. Callers that do not care may ignore it.
+func _put(x: int, y: int, z: int, mat: int) -> int:
 	if x < 0 or x >= CS or z < 0 or z >= CS or y < 0:
-		return
+		return -1
 	# The column fills y = 0 .. h-1, so anything below h would sit inside the
 	# terrain. Keeping the topmost terrain voxel too would emit a second set of
 	# coplanar faces on top of the ground surface and make the two z-fight.
-	if y < _h(x, z):
-		return # buried inside the terrain
-	_extras[Vector3i(x, y, z)] = mat
+	if y < _heights[(z + 1) * MS + (x + 1)]:
+		return -1 # buried inside the terrain
+	var key := y | (x << KEY_X) | (z << KEY_Z)
+	_extras[key] = mat
+	return key
 
 
 ## Features are planted on a fixed 6.4 m grid, which is one chunk at level 0 but
 ## `_k` chunks across at level `_k`, so the scan covers as many feature cells as
 ## this chunk spans plus one either side for the parts that hang over the edge.
 func _place_features() -> void:
+	# One generator, reseeded per cell. Assigning `seed` restarts the stream,
+	# so every feature rolls exactly what it used to; what goes away is an
+	# object allocation per cell, of which the coarse levels have hundreds.
+	var rng := RandomNumberGenerator.new()
 	for fcz in range(_cz * _k - 1, (_cz + 1) * _k + 1):
 		for fcx in range(_cx * _k - 1, (_cx + 1) * _k + 1):
 			var f := _gen.feature_in_cell(fcx, fcz)
@@ -429,7 +488,6 @@ func _place_features() -> void:
 			var lz: int = _to_local(int(f["z"]), _oz)
 			var base_y := _gen.height_voxels(
 				float(f["x"]) * FINE_VS, float(f["z"]) * FINE_VS, _vs)
-			var rng := RandomNumberGenerator.new()
 			rng.seed = TerrainGen.hash2i(fcx, fcz, _gen.world_seed)
 			match f["kind"]:
 				"tree":
@@ -677,9 +735,8 @@ func _add_mushroom_light(cx: int, base_y: int, stem_h: int, cz: int, cap_r: int,
 ## Places a voxel that may end up on the glow surface, remembering which
 ## mushroom it belongs to.
 func _put_glow(x: int, y: int, z: int, mat: int, phase: float) -> void:
-	_put(x, y, z, mat)
-	var key := Vector3i(x, y, z)
-	if _extras.has(key):
+	var key := _put(x, y, z, mat)
+	if key >= 0:
 		_glow_phase[key] = phase
 
 
@@ -736,11 +793,29 @@ func _blob_shell(lobes: Array, mat: int, rough: float) -> void:
 	if mx.x < 0 or mn.x >= CS or mx.z < 0 or mn.z >= CS or mx.y < 0:
 		return
 
+	# A tree rooted near a chunk border has most of its crown in the neighbour,
+	# and filling that part here only to have `_put` throw it away is the
+	# single most wasteful thing this builder used to do. One voxel of margin
+	# is kept on every side, which is all the shell test below looks at, so the
+	# surface that survives is identical to the unclipped one.
+	mn.x = maxi(mn.x, -1)
+	mn.y = maxi(mn.y, -1)
+	mn.z = maxi(mn.z, -1)
+	mx.x = mini(mx.x, CS)
+	mx.z = mini(mx.z, CS)
+
 	var sx := mx.x - mn.x + 1
 	var sy := mx.y - mn.y + 1
 	var sz := mx.z - mn.z + 1
 	var inside := PackedByteArray()
 	inside.resize(sx * sy * sz)
+
+	# `TerrainGen.hash2i` inlined: it is a handful of integer ops, but it was
+	# being reached through a static call once per cell of every lobe's box,
+	# which is hundreds of thousands of calls for one big tree at level 0.
+	# Salt 7, folded into a constant.
+	const SALT7 := 7 * 83492791
+	const INV_1023 := 1.0 / 1023.0
 
 	for l in lobes:
 		var c: Vector3i = l["c"]
@@ -757,12 +832,15 @@ func _blob_shell(lobes: Array, mat: int, rough: float) -> void:
 				var fyz := fy2 + fz * fz
 				if fyz > 1.3:
 					continue
+				var hz: int = z * 19349663 ^ SALT7
+				var base := row - mn.x
 				for x in range(maxi(c.x - r.x, mn.x), mini(c.x + r.x, mx.x) + 1):
 					var fx := float(x - c.x) * irx
 					var d := fyz + fx * fx
-					var jitter := (float(TerrainGen.hash2i(x * 31 + y, z, 7) & 1023) / 1023.0 - 0.5) * rough
-					if d < 1.0 + jitter:
-						inside[row + x - mn.x] = 1
+					var hh: int = (x * 31 + y) * 73856093 ^ hz
+					hh = (hh ^ (hh >> 13)) * 1274126177
+					if d < 1.0 + (float(hh & 1023) * INV_1023 - 0.5) * rough:
+						inside[base + x] = 1
 
 	for y in range(sy):
 		for z in range(sz):
@@ -778,55 +856,58 @@ func _blob_shell(lobes: Array, mat: int, rough: float) -> void:
 					_put(mn.x + x, mn.y + y, mn.z + z, mat)
 
 
-const _NEIGHBOURS: Array[Vector3i] = [
-	Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
-	Vector3i(0, 1, 0), Vector3i(0, -1, 0),
-	Vector3i(0, 0, 1), Vector3i(0, 0, -1),
-]
+## A neighbouring voxel hides this face if a feature voxel occupies it, or if it
+## is buried in the terrain. X and Z here are always within one of the chunk,
+## which is the range the height margin covers, so the terrain test is always
+## available.
+##
+## The packed key is only usable for the lookup when the neighbour is inside the
+## chunk: stepping X or Z off the edge would borrow across the bit fields and
+## land on some unrelated voxel.
+func _hidden(nx: int, ny: int, nz: int, nkey: int) -> bool:
+	if nx >= 0 and nx < CS and nz >= 0 and nz < CS and ny >= 0 and _extras.has(nkey):
+		return true
+	return ny < _heights[(nz + 1) * MS + (nx + 1)]
 
 
 func _mesh_features() -> void:
 	for key in _extras:
-		var p: Vector3i = key
 		var mat: int = _extras[key]
+		var y: int = key & KEY_Y_MASK
+		var x: int = (key >> KEY_X) & KEY_XY
+		var z: int = (key >> KEY_Z) & KEY_XY
 		var col := VoxelDefs.color_of(mat)
 		var collide: bool = VoxelDefs.SOLID_FEATURES.has(mat)
 		_sway = mat == VoxelDefs.BLADE
 		if _sway:
-			_sway_uv = _sway_data(p)
+			_sway_uv = _sway_data(x, y, z)
 		_glow = VoxelDefs.GLOW.has(mat)
 		if _glow:
-			_glow_uv = Vector2(VoxelDefs.GLOW[mat], _glow_phase.get(p, 0.0))
-		var x0 := float(p.x) * _vs
+			_glow_uv = Vector2(VoxelDefs.GLOW[mat], _glow_phase.get(key, 0.0))
+		var x0 := float(x) * _vs
 		var x1 := x0 + _vs
-		var y0 := float(p.y) * _vs
+		var y0 := float(y) * _vs
 		var y1 := y0 + _vs
-		var z0 := float(p.z) * _vs
+		var z0 := float(z) * _vs
 		var z1 := z0 + _vs
-		for n in _NEIGHBOURS:
-			var q := p + n
-			if _extras.has(q):
-				continue
-			if q.x >= -1 and q.x <= CS and q.z >= -1 and q.z <= CS and q.y < _h(q.x, q.z):
-				continue # hidden by terrain
-			if n.x == 1:
-				_quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1),
-					Vector3.RIGHT, col, collide)
-			elif n.x == -1:
-				_quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0),
-					Vector3.LEFT, col, collide)
-			elif n.y == 1:
-				_quad(Vector3(x0, y1, z0), Vector3(x0, y1, z1), Vector3(x1, y1, z1), Vector3(x1, y1, z0),
-					Vector3.UP, col, collide)
-			elif n.y == -1:
-				_quad(Vector3(x0, y0, z1), Vector3(x0, y0, z0), Vector3(x1, y0, z0), Vector3(x1, y0, z1),
-					Vector3.DOWN, col, collide)
-			elif n.z == 1:
-				_quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1),
-					Vector3.BACK, col, collide)
-			else:
-				_quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0),
-					Vector3.FORWARD, col, collide)
+		if not _hidden(x + 1, y, z, key + KEY_DX):
+			_quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1),
+				Vector3.RIGHT, col, collide)
+		if not _hidden(x - 1, y, z, key - KEY_DX):
+			_quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0),
+				Vector3.LEFT, col, collide)
+		if not _hidden(x, y + 1, z, key + 1):
+			_quad(Vector3(x0, y1, z0), Vector3(x0, y1, z1), Vector3(x1, y1, z1), Vector3(x1, y1, z0),
+				Vector3.UP, col, collide)
+		if not _hidden(x, y - 1, z, key - 1):
+			_quad(Vector3(x0, y0, z1), Vector3(x0, y0, z0), Vector3(x1, y0, z0), Vector3(x1, y0, z1),
+				Vector3.DOWN, col, collide)
+		if not _hidden(x, y, z + 1, key + KEY_DZ):
+			_quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1),
+				Vector3.BACK, col, collide)
+		if not _hidden(x, y, z - 1, key - KEY_DZ):
+			_quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0),
+				Vector3.FORWARD, col, collide)
 
 	_sway = false
 	_glow = false
@@ -835,6 +916,6 @@ func _mesh_features() -> void:
 ## Wind data baked into the UV of a grass voxel: how stiff it is (0 at the
 ## ground, 1 at the tip of a tuft) and a phase that is unique per tuft column
 ## so neighbouring tufts do not sway in lockstep.
-func _sway_data(p: Vector3i) -> Vector2:
-	var above := float(p.y - _h(clampi(p.x, -1, CS), clampi(p.z, -1, CS))) * _vs
-	return Vector2(clampf(above / (_vs * 4.0), 0.0, 1.0), _gen.rand01(_ox + p.x, _oz + p.z, 0x21ad))
+func _sway_data(x: int, y: int, z: int) -> Vector2:
+	var above := float(y - _heights[(z + 1) * MS + (x + 1)]) * _vs
+	return Vector2(clampf(above / (_vs * 4.0), 0.0, 1.0), _gen.rand01(_ox + x, _oz + z, 0x21ad))
