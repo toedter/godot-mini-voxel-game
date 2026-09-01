@@ -1,4 +1,4 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=20 format=3]
 
 [ext_resource type="Script" path="res://scripts/voxel_world.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/player.gd" id="2_player"]
@@ -13,6 +13,7 @@
 [ext_resource type="Script" path="res://scripts/pedestal.gd" id="11_pedestal"]
 [ext_resource type="Script" path="res://scripts/glow_cap.gd" id="12_cap"]
 [ext_resource type="Script" path="res://scripts/interior.gd" id="13_interior"]
+[ext_resource type="Script" path="res://scripts/save_game.gd" id="14_save"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_1"]
 sky_top_color = Color(0.25, 0.48, 0.9, 1)
@@ -133,6 +134,9 @@ offset = Vector3(4, 0, 3)
 
 [node name="Vault" type="Node3D" parent="."]
 script = ExtResource("13_interior")
+
+[node name="SaveGame" type="Node" parent="."]
+script = ExtResource("14_save")
 
 [node name="HUD" type="CanvasLayer" parent="."]
 script = ExtResource("3_hud")

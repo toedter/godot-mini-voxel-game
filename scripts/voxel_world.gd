@@ -200,6 +200,7 @@ func _ready() -> void:
 	# Props reparent themselves as they are picked up and put down, so they
 	# cannot hold a NodePath to the world; they look it up by group instead.
 	add_to_group("voxel_world")
+	add_to_group("savable")
 	gen = TerrainGen.new(world_seed)
 	# Before anything is meshed: chunk jobs read the set from worker threads and
 	# nothing may write to it once they are running.
@@ -896,3 +897,30 @@ func biome_name_at(pos: Vector3) -> String:
 
 func loaded_chunks() -> int:
 	return _chunks.size()
+
+
+# --------------------------------------------------------------------------
+# saving
+# --------------------------------------------------------------------------
+
+## Nothing about the island is saved: it is a pure function of `world_seed`,
+## which SaveGame checks separately. Only what the player moved.
+func save_state() -> Dictionary:
+	# Only where the water is heading. A save taken while the tide is still
+	# coming in restores it already arrived: a load is not the moment to
+	# resume an animation, and honouring a half finished one would leave the
+	# far terrain painted for a level the water is not at.
+	return {"tide_target": _tide_target, "indoors": indoors}
+
+
+func load_state(d: Dictionary) -> void:
+	indoors = bool(d.get("indoors", false))
+	# Straight to the level rather than easing to it: a load is not a tide
+	# coming in, and the far terrain has to be repainted for where the water
+	# actually is before the player sees anything.
+	set_tide(float(d.get("tide_target", VoxelDefs.SEA_DATUM)), true)
+
+
+## Before anything that depends on the tide or on being indoors.
+func save_priority() -> int:
+	return 0

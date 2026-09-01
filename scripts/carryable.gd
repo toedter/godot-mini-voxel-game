@@ -29,6 +29,7 @@ var _world: VoxelWorld
 
 func _ready() -> void:
 	super()
+	add_to_group("savable")
 	prompt = take_prompt
 	_rest_position = global_position
 	_world = get_tree().get_first_node_in_group("voxel_world") as VoxelWorld
@@ -47,12 +48,14 @@ func _on_use(actor: Node3D) -> void:
 	if aim == null:
 		return
 	if _holder == null:
-		_pick_up(aim)
+		take_by(aim)
 	else:
 		drop()
 
 
-func _pick_up(aim: Interactor) -> void:
+## Puts this into a hand. Public because a restored save has to hand the
+## player back what they were carrying without going through a use.
+func take_by(aim: Interactor) -> void:
 	# Anything already in that hand goes down first, so the player cannot end
 	# up holding two things with only one carry pose to put them in.
 	var busy := aim.carried()
@@ -131,3 +134,80 @@ func _physics_process(delta: float) -> void:
 	var k: float = clampf(_holder.carry_lerp * delta, 0.0, 1.0)
 	position = position.lerp(_holder.carry_offset, k)
 	quaternion = quaternion.slerp(Quaternion.IDENTITY, k)
+
+
+# --------------------------------------------------------------------------
+# saving
+# --------------------------------------------------------------------------
+
+## The pedestal this is seated in, if any. Found by walking up rather than by
+## being told, so the socket stays the only thing that knows it seated this.
+func _pedestal_host() -> Pedestal:
+	var n := get_parent()
+	while n != null:
+		if n is Pedestal:
+			return n as Pedestal
+		n = n.get_parent()
+	return null
+
+
+func save_state() -> Dictionary:
+	var host := _pedestal_host()
+	var where := "ground"
+	if _holder != null:
+		where = "held"
+	elif host != null:
+		where = "stowed"
+	return {
+		"where": where,
+		"pos": SaveGame.pack(global_position),
+		"host": "" if host == null else String(host.name),
+	}
+
+
+func load_state(d: Dictionary) -> void:
+	# Off whatever it is on now, so restoring into a different place cannot
+	# leave it seated in two.
+	if _holder != null:
+		drop()
+	var host := _pedestal_host()
+	if host != null:
+		host.clear()
+
+	match String(d.get("where", "ground")):
+		"held":
+			var aim := _first_interactor()
+			if aim != null:
+				take_by(aim)
+				return
+		"stowed":
+			var seat := _pedestal_named(String(d.get("host", "")))
+			if seat != null:
+				seat.place(self)
+				return
+	global_position = SaveGame.unpack(d.get("pos", [0, 0, 0]))
+	prompt = take_prompt
+	refresh_prompt()
+
+
+## Sockets are found by name through their group, for the same reason state is
+## keyed by name: a path is only good until something is reparented.
+func _pedestal_named(n: String) -> Pedestal:
+	for p in get_tree().get_nodes_in_group("pedestal"):
+		if String((p as Node).name) == n:
+			return p as Pedestal
+	return null
+
+
+func _first_interactor() -> Interactor:
+	for n in get_tree().get_nodes_in_group("interactor"):
+		var it := n as Interactor
+		if it != null and it.can_process():
+			return it
+	return null
+
+
+## After the world, before the lock: seating an item in a pedestal unlocks it,
+## and the lock's own saved state has to be the last word on that.
+func save_priority() -> int:
+	return 10

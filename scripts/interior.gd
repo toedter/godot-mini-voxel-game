@@ -38,6 +38,7 @@ var _built := false
 
 
 func _ready() -> void:
+	add_to_group("savable")
 	_world = get_node_or_null(world_path) as VoxelWorld
 	if _world == null or _world.gen == null or _world.gen.structures == null:
 		return
@@ -142,3 +143,14 @@ func leave(body: Node3D) -> void:
 	if body is CharacterBody3D:
 		(body as CharacterBody3D).velocity = Vector3.ZERO
 	left.emit()
+
+
+## Only the way back out. The room itself is rebuilt from its parameters every
+## run, exactly as the island is rebuilt from its seed.
+func save_state() -> Dictionary:
+	return {"return_to": SaveGame.pack(_return_to), "has_return": _has_return}
+
+
+func load_state(d: Dictionary) -> void:
+	_return_to = SaveGame.unpack(d.get("return_to", [0, 0, 0]))
+	_has_return = bool(d.get("has_return", false))

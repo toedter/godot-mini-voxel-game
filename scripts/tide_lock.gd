@@ -32,6 +32,7 @@ var _wheel: Node3D
 func _ready() -> void:
 	super()
 	_world = get_node_or_null(world_path) as VoxelWorld
+	add_to_group("savable")
 	_build_body()
 	_bind_key()
 	# Start on whichever notch the water is already at, so the first turn moves
@@ -144,3 +145,19 @@ func _on_use(_actor: Node3D) -> void:
 		t.tween_property(_wheel, "rotation:y",
 			_wheel.rotation.y + TAU / 8.0, 0.45).set_trans(Tween.TRANS_CUBIC)
 	_update_prompt()
+
+
+func save_state() -> Dictionary:
+	return {"notch": _index, "locked": locked}
+
+
+func load_state(d: Dictionary) -> void:
+	_index = clampi(int(d.get("notch", 0)), 0, maxi(notches.size() - 1, 0))
+	locked = bool(d.get("locked", false))
+	_update_prompt()
+
+
+## After the pedestal, whose filling would otherwise unlock this again on the
+## way past and overwrite what was saved.
+func save_priority() -> int:
+	return 15

@@ -25,6 +25,7 @@ var _item: Carryable
 
 func _ready() -> void:
 	super()
+	add_to_group("pedestal")
 	_build_body()
 	_slot = Node3D.new()
 	_slot.position = Vector3.UP * slot_height
@@ -110,12 +111,29 @@ func _on_use(actor: Node3D) -> void:
 	if held == null or not _fits(held):
 		_update_prompt(aim)
 		return
-	_item = held
-	held.stow(_slot)
-	held.position = Vector3.ZERO
-	held.rotation = Vector3.ZERO
+	place(held)
 	_update_prompt(aim)
+
+
+## Seats an item in the socket. Public so a restored save can put one back
+## without a player standing there holding it.
+func place(c: Carryable) -> void:
+	_item = c
+	c.stow(_slot)
+	c.position = Vector3.ZERO
+	c.rotation = Vector3.ZERO
 	filled.emit(_item)
+
+
+## Empties the socket without handing the item anywhere. What a restored save
+## needs before it puts everything back where it belongs.
+func clear() -> void:
+	if _item == null:
+		return
+	var was := _item
+	_item = null
+	was.unstow()
+	emptied.emit(was)
 
 
 func _take_back(aim: Interactor) -> void:

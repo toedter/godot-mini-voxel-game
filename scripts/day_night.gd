@@ -37,6 +37,7 @@ var sun_height: float = 0.0
 
 
 func _ready() -> void:
+	add_to_group("savable")
 	time_of_day = start_time
 	_apply()
 
@@ -111,3 +112,12 @@ func _palette(night: Color, dusk: Color, day: Color) -> Color:
 	var lit := smoothstep(-0.02, 0.25, sun_height)
 	var low := clampf(1.0 - absf(sun_height) / 0.18, 0.0, 1.0)
 	return night.lerp(day, lit).lerp(dusk, low)
+
+
+func save_state() -> Dictionary:
+	return {"time": time_of_day, "paused": paused}
+
+
+func load_state(d: Dictionary) -> void:
+	time_of_day = float(d.get("time", start_time))
+	paused = bool(d.get("paused", false))
