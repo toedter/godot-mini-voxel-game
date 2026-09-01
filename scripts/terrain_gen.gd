@@ -556,6 +556,12 @@ func rand01(a: int, b: int, salt: int) -> float:
 	return float(hash2i(a, b, salt ^ world_seed)) / 2147483647.0
 
 
+## Authored buildings standing on this terrain. Set once by VoxelWorld before
+## the first chunk is meshed, then only ever read - including from the worker
+## threads, which is what the "never written again" part buys.
+var structures: StructureSet
+
+
 # --------------------------------------------------------------------------
 # features
 # --------------------------------------------------------------------------

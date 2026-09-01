@@ -192,6 +192,9 @@ func _ready() -> void:
 	# cannot hold a NodePath to the world; they look it up by group instead.
 	add_to_group("voxel_world")
 	gen = TerrainGen.new(world_seed)
+	# Before anything is meshed: chunk jobs read the set from worker threads and
+	# nothing may write to it once they are running.
+	gen.structures = StructureSet.for_island(gen)
 	_ensure_materials()
 	_create_water()
 	_create_far_terrain()
@@ -453,6 +456,30 @@ func _input(event: InputEvent) -> void:
 			set_tide(_tide_target - tide_step)
 		KEY_HOME:
 			set_tide(VoxelDefs.SEA_DATUM)
+		KEY_T:
+			_teleport_to_structures()
+
+
+## Debug scaffolding, same family as the tide keys. The shallows are only ever
+## at the coast, so the drowned ruin stands a few hundred metres from a spawn
+## that is by construction up on the island's dome; walking there to check a
+## change is not iteration.
+func _teleport_to_structures() -> void:
+	if gen == null or gen.structures == null or gen.structures.size() == 0:
+		return
+	var first := gen.structures.all()[0]
+	var x := float(first["x"]) * VoxelDefs.VOXEL_SIZE
+	var z := float(first["z"]) * VoxelDefs.VOXEL_SIZE
+	# Stood back a little and above the ground, so the arrival looks at the
+	# ruin rather than inside a wall.
+	var back := Vector2(x, z).normalized() * 6.0
+	x += back.x
+	z += back.y
+	var p := get_node_or_null(player_path) as Node3D
+	if p == null:
+		return
+	p.global_position = Vector3(x, gen.ground_y(x, z) + 2.0, z)
+	_update_center(true)
 
 
 func _update_water() -> void:

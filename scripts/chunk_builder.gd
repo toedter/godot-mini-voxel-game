@@ -460,6 +460,156 @@ func _place_features() -> void:
 				"mushroom":
 					_add_mushroom(lx, lz, base_y, rng, fcx, fcz)
 	_add_ground_cover()
+	# After the ground cover, so masonry wins over a tuft of grass standing in
+	# the same voxel rather than the other way round.
+	_place_structures()
+
+
+# --------------------------------------------------------------------------
+# structures
+# --------------------------------------------------------------------------
+
+## How far (voxels) a structure's footing is carried below its base, so that it
+## meets the ground on the low side instead of standing on stilts. Anything
+## that ends up under the terrain is dropped by `_put`, at no cost.
+const FOOTING := 12
+
+## Authored buildings that reach into this chunk.
+##
+## Every chunk a structure touches builds the whole of it and lets `_put` throw
+## away what falls outside; a wall is a few thousand voxels, which is cheaper
+## than working out the intersection twice. The shapes are functions of world
+## coordinates only, so two chunks meshing the same wall agree on it exactly.
+func _place_structures() -> void:
+	if _gen.structures == null:
+		return
+	for it in _gen.structures.overlapping(_ox, _oz, CS):
+		match it["kind"]:
+			StructureSet.WALL:
+				_build_wall(it)
+			StructureSet.PILLAR:
+				_build_pillar(it)
+			StructureSet.ARCH:
+				_build_arch(it)
+
+
+## 0..1 from a world column, for shapes that have to look the same from
+## whichever chunk builds them.
+func _stone_hash(wx: int, wz: int, salt: int) -> float:
+	return float(TerrainGen.hash2i(wx, wz, _gen.world_seed ^ salt)) / 2147483647.0
+
+
+## How many voxels are missing from the top of a ruined column of masonry.
+##
+## Two scales: a coarse one that takes whole stretches of a wall down together,
+## so it reads as collapsed rather than as noise, and a fine one that roughens
+## the edge it leaves behind.
+func _ruin_bite(wx: int, wz: int, height: int) -> int:
+	var coarse := _stone_hash(wx >> 3, wz >> 3, 0x51)
+	var fine := _stone_hash(wx, wz, 0x9d)
+	return int(coarse * float(height) * 0.55) + int(fine * 2.99)
+
+
+## Clips an offset range of [-half, +half] about a world coordinate down to the
+## part that lands in this chunk, so a wall crossing three chunks is only
+## walked where it actually is. `_put` would reject the rest anyway; this is
+## about not generating it in the first place.
+func _clip(centre: int, half: int, origin: int) -> Vector2i:
+	return Vector2i(maxi(-half, origin - centre),
+		mini(half, origin + CS - 1 - centre))
+
+
+## Where a column of masonry can start: no lower than the terrain surface,
+## since everything under it is discarded as buried.
+func _footing_start(lx: int, lz: int, base: int) -> int:
+	return maxi(base - FOOTING, _heights[(lz + 1) * MS + (lx + 1)])
+
+
+func _build_wall(it: Dictionary) -> void:
+	var axis: int = it["axis"]
+	var mat: int = it["mat"]
+	var base: int = it["base"]
+	var height: int = it["height"]
+	var half_l: int = int(it["length"]) / 2
+	var half_t: int = int(it["thickness"]) / 2
+	# u runs along the wall, v across its thickness; which of those is X
+	# depends on the axis, and so does which chunk edge clips each of them.
+	var ur := _clip(int(it["x"] if axis == 0 else it["z"]), half_l,
+		_ox if axis == 0 else _oz)
+	var vr := _clip(int(it["z"] if axis == 0 else it["x"]), half_t,
+		_oz if axis == 0 else _ox)
+	for u in range(ur.x, ur.y + 1):
+		for v in range(vr.x, vr.y + 1):
+			var wx: int = int(it["x"]) + (u if axis == 0 else v)
+			var wz: int = int(it["z"]) + (v if axis == 0 else u)
+			var lx := wx - _ox
+			var lz := wz - _oz
+			var top := base + height - _ruin_bite(wx, wz, height)
+			for y in range(_footing_start(lx, lz, base), top):
+				_put(lx, y, lz, mat)
+
+
+func _build_pillar(it: Dictionary) -> void:
+	var mat: int = it["mat"]
+	var base: int = it["base"]
+	var height: int = it["height"]
+	var radius: int = it["radius"]
+	var rsq := radius * radius
+	var xr := _clip(int(it["x"]), radius, _ox)
+	var zr := _clip(int(it["z"]), radius, _oz)
+	for dz in range(zr.x, zr.y + 1):
+		for dx in range(xr.x, xr.y + 1):
+			if dx * dx + dz * dz > rsq:
+				continue
+			var wx: int = int(it["x"]) + dx
+			var wz: int = int(it["z"]) + dz
+			var lx := wx - _ox
+			var lz := wz - _oz
+			# Only the last couple of voxels are chipped: a column that lost
+			# half its width would not still be standing.
+			var top := base + height - int(_stone_hash(wx, wz, 0x2b) * 2.99)
+			for y in range(_footing_start(lx, lz, base), top):
+				_put(lx, y, lz, mat)
+
+
+## Two jambs and a lintel. The opening is left clear all the way through, so it
+## can actually be walked into.
+func _build_arch(it: Dictionary) -> void:
+	var axis: int = it["axis"]
+	var mat: int = it["mat"]
+	var base: int = it["base"]
+	var height: int = it["height"]
+	var half_w: int = int(it["width"]) / 2
+	var half_t: int = int(it["thickness"]) / 2
+	# The lintel is a fifth of the height, and the jambs carry the rest.
+	var lintel := maxi(height / 5, 2)
+	var jamb_top := base + height - lintel
+	# Jambs sit just outside the opening, so `width` is the clear span.
+	var jamb := half_w + half_t + 1
+	for side_of in [-jamb, jamb]:
+		var side: int = side_of
+		for w in range(-half_t, half_t + 1):
+			for v in range(-half_t, half_t + 1):
+				var off := side + w
+				var wx: int = int(it["x"]) + (off if axis == 0 else v)
+				var wz: int = int(it["z"]) + (v if axis == 0 else off)
+				var lx := wx - _ox
+				var lz := wz - _oz
+				if lx < 0 or lx >= CS or lz < 0 or lz >= CS:
+					continue
+				for y in range(_footing_start(lx, lz, base), jamb_top):
+					_put(lx, y, lz, mat)
+	for u in range(-jamb - half_t, jamb + half_t + 1):
+		for v in range(-half_t, half_t + 1):
+			var wx: int = int(it["x"]) + (u if axis == 0 else v)
+			var wz: int = int(it["z"]) + (v if axis == 0 else u)
+			var lx := wx - _ox
+			var lz := wz - _oz
+			if lx < 0 or lx >= CS or lz < 0 or lz >= CS:
+				continue
+			var top := base + height - int(_stone_hash(wx, wz, 0x77) * 2.99)
+			for y in range(jamb_top, top):
+				_put(lx, y, lz, mat)
 
 
 func _add_tree(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:

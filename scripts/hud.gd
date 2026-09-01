@@ -33,7 +33,7 @@ func _process(_delta: float) -> void:
 		return
 	var p := _player.global_position
 	var hint := "WASD move   Shift sprint   Space jump / swim up   Ctrl dive   Mouse look   Esc release cursor"
-	hint += "   PgUp/PgDn tide   Home reset tide"
+	hint += "   PgUp/PgDn tide   Home reset tide   T go to ruins"
 	if _music != null:
 		hint += "   M music: %s" % ("on" if _music.is_music_enabled() else "off")
 	if _day != null:
