@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://addons/godot-xr-development-kit/player/components/gxdk_locomotion_handler.gd" id="1_loco"]
 [ext_resource type="Script" path="res://addons/godot-xr-development-kit/player/movement_providers/gxdk_raycast_body.gd" id="2_ray"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://addons/godot-xr-development-kit/player/movement_providers/gxdk_direct_movement.gd" id="4_move"]
 [ext_resource type="Script" path="res://scripts/xr_ground_clamp.gd" id="5_clamp"]
 [ext_resource type="Script" path="res://scripts/xr_snap_turn.gd" id="6_snap"]
+[ext_resource type="Script" path="res://scripts/interactor.gd" id="7_interactor"]
 
 [node name="XRPlayer" type="CharacterBody3D"]
 collision_mask = 255
@@ -48,3 +49,6 @@ tracker = &"right_hand"
 script = ExtResource("6_snap")
 turn_action = "move"
 step_angle = 0.5235988
+
+[node name="Interactor" type="Node3D" parent="XROrigin3D/RightHand"]
+script = ExtResource("7_interactor")
