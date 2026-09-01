@@ -36,6 +36,7 @@ signal carry_changed(item: Node3D)
 var _focus: Interactable
 var _carried: Node3D
 var _controller: XRController3D
+var _body: CollisionObject3D
 var _xr_was_down := false
 ## Bodies the ray must ignore: the player's own collider.
 var _exclude: Array[RID] = []
@@ -44,9 +45,9 @@ var _exclude: Array[RID] = []
 func _ready() -> void:
 	add_to_group("interactor")
 	_controller = get_parent() as XRController3D
-	var body := _find_body()
-	if body != null:
-		_exclude = [body.get_rid()]
+	_body = _find_body()
+	if _body != null:
+		_exclude = [_body.get_rid()]
 
 
 ## The player's collider, so the ray does not start inside it and stop dead.
@@ -57,6 +58,13 @@ func _find_body() -> CollisionObject3D:
 			return n as CollisionObject3D
 		n = n.get_parent()
 	return null
+
+
+## The player's own physics body, whichever rig this belongs to. Anything that
+## has to move the player - a door leading into an interior - wants this rather
+## than a path to a node only one of the two rigs has.
+func body() -> CollisionObject3D:
+	return _body
 
 
 ## What the player is currently pointing at, or null.

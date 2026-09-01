@@ -133,6 +133,15 @@ var _tide_target: float = VoxelDefs.SEA_DATUM
 @export var player_path: NodePath = ^"../Player"
 
 var gen: TerrainGen
+## True while the player stands in an interior rather than on the island.
+##
+## Interiors are built below the terrain, which puts the player somewhere the
+## outdoor rules actively fight: both surface clamps exist to shove a body that
+## has fallen through un-streamed collision back onto the heightmap, and the
+## water level is far above, so buoyancy would have them swimming. One flag
+## suspends all of it, read by Player, XRGroundClamp and Atmosphere.
+var indoors := false
+
 ## World XZ the player was put down at. Searched for at runtime, so props that
 ## want to be placed near the player have to read it rather than assume one.
 var spawn_xz := Vector2.ZERO

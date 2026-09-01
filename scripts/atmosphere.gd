@@ -137,6 +137,11 @@ func _materials() -> Array[ShaderMaterial]:
 func _process(delta: float) -> void:
 	if _env == null or _world == null or _player == null or _world.gen == null:
 		return
+	if _world.indoors:
+		_apply_indoors()
+		return
+	if _was_indoors:
+		_leave_indoors()
 	var p := _player.global_position
 	var target := smoothstep(0.35, 0.65, _world.gen.biome_at(p.x, p.z))
 
@@ -211,3 +216,44 @@ func _apply_tint(dust: float) -> void:
 		m.set_shader_parameter("haze_ground", Vector3(lin_deep.r, lin_deep.g, lin_deep.b))
 		m.set_shader_parameter("haze_top", Vector3(lin_top.r, lin_top.g, lin_top.b))
 		m.set_shader_parameter("haze_sky_curve", curve)
+
+
+# --------------------------------------------------------------------------
+# interiors
+# --------------------------------------------------------------------------
+
+## Ambient light left inside a sealed room. Not zero: pitch black is not
+## atmospheric, it is a black screen. Low enough that a glow-cap is the
+## difference between seeing the room and not.
+const INDOOR_AMBIENT := Color(0.09, 0.10, 0.13)
+const INDOOR_AMBIENT_ENERGY := 0.16
+
+var _was_indoors := false
+
+
+## Everything the outdoor air does is wrong underground: there is no sky to
+## fade the distance into, no sun to come through a sealed ceiling, and no
+## coast to tint the haze. Applied once on the way in rather than every frame,
+## since nothing about it moves.
+func _apply_indoors() -> void:
+	if _was_indoors:
+		return
+	_was_indoors = true
+	_env.background_mode = Environment.BG_COLOR
+	_env.background_color = Color(0.01, 0.012, 0.02)
+	_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	_env.ambient_light_color = INDOOR_AMBIENT
+	_env.ambient_light_energy = INDOOR_AMBIENT_ENERGY
+	_world.set_far_visible(false)
+	# The sun would light the floor through a ceiling it never reaches, since
+	# the shadow cascades stop long before anything that could block it.
+	if _day != null:
+		_day.visible = false
+
+
+func _leave_indoors() -> void:
+	_was_indoors = false
+	_env.background_mode = Environment.BG_SKY
+	_env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	if _day != null:
+		_day.visible = true

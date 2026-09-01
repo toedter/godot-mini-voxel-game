@@ -52,7 +52,10 @@ func _input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	# How much of the 1.7 m capsule is under the sea surface.
-	_submersion = clampf((_water_y() - global_position.y) / 1.7, 0.0, 1.0)
+	# Indoors the sea is hundreds of metres overhead and means nothing here.
+	_submersion = 0.0
+	if not _inside():
+		_submersion = clampf((_water_y() - global_position.y) / 1.7, 0.0, 1.0)
 	# Chest deep is where the feet stop carrying the body. Standing on the sea
 	# bed counts too, otherwise the player would walk along the bottom of the
 	# bay instead of floating back up.
@@ -119,13 +122,18 @@ func _swim(delta: float) -> void:
 ## World Y the water stands at right now. The tide moves it, so it is read
 ## from the world rather than from the datum the land was shaped around; with
 ## no world wired up the two are the same thing.
+## True while standing in an interior, where the outdoor rules are suspended.
+func _inside() -> bool:
+	return _world != null and _world.indoors
+
+
 func _water_y() -> float:
 	return VoxelDefs.SEA_DATUM if _world == null else _world.water_level
 
 
 ## True while the head is under the surface, so the camera can be tinted.
 func is_underwater() -> bool:
-	return global_position.y + 1.6 < _water_y()
+	return not _inside() and global_position.y + 1.6 < _water_y()
 
 
 ## Lets the capsule climb the small 10 cm terrain steps without stopping.
@@ -158,7 +166,7 @@ func _try_step_up(before: Vector3, motion: Vector3) -> void:
 ## one - and that is a bobbing you can see standing still. Held to the collision
 ## surface it only ever fires when there really is no ground.
 func _clamp_to_terrain() -> void:
-	if _world == null or _world.gen == null:
+	if _world == null or _world.gen == null or _world.indoors:
 		return
 	var g := _world.gen.collision_y(global_position.x, global_position.z)
 	if global_position.y < g:

@@ -41,6 +41,10 @@ func _ready() -> void:
 func _physics_process(_delta: float) -> void:
 	if _body == null or _world == null or _world.gen == null:
 		return
+	# Interiors sit below the terrain, so the pin would drag the player up
+	# through the floor and out onto the island.
+	if _world.indoors:
+		return
 	var p := _body.global_position
 	# The height the collision shape really has. The voxel lip from ground_y()
 	# stands up to half a voxel above it on a slope, and correcting to that

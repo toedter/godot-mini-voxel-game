@@ -39,6 +39,16 @@ func all() -> Array[Dictionary]:
 	return _items
 
 
+## The first placement of a kind, or an empty dictionary. Used by anything that
+## has to stand somewhere a structure put itself, such as the door in the
+## ruin's archway.
+func first_of(kind: StringName) -> Dictionary:
+	for it in _items:
+		if it["kind"] == kind:
+			return it
+	return {}
+
+
 ## Everything whose footprint reaches into the square of `span` voxels starting
 ## at (ox, oz).
 ##
