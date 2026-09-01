@@ -11,11 +11,14 @@ extends Node3D
 ## detail; what you cannot see is mist.
 ##
 ## Behind the mist stands FarTerrain, a static mesh of the whole island. It is
-## built once and never touched again, and on the plain it is as thoroughly
-## hazed over as the chunks are. It earns its keep higher up, where the mist
+## built once and then only ever repainted when the tide moves, and on the
+## plain it is as thoroughly hazed over as the chunks are. It earns its keep higher up, where the mist
 ## thins out and the peaks across the island rise out of it.
 
 signal world_ready
+## Fires once the tide has settled at a new level, after the distant island has
+## been repainted for it. The hook a game hangs "the water reached the mark" on.
+signal tide_changed(water_y: float)
 
 @export var world_seed: int = 1337
 ## Radius (m) out to which chunks are streamed. Everything inside it is the
@@ -95,6 +98,25 @@ signal world_ready
 ## per fragment, so this mostly decides how well the swell holds its shape
 ## against the sky rather than how detailed the water looks.
 @export_range(0.5, 8.0, 0.1) var water_quad: float = 2.5
+## World Y the water surface currently stands at, and the level it is easing
+## towards. Everything that asks about water - buoyancy, the underwater murk,
+## the sea plane, the painted ocean in the distance - reads `water_level`, and
+## nothing reads VoxelDefs.SEA_DATUM, which only shapes the land.
+##
+## The two are equal at startup, so a world nobody moves the tide in looks
+## exactly as it always did.
+var water_level: float = VoxelDefs.SEA_DATUM
+var _tide_target: float = VoxelDefs.SEA_DATUM
+## How fast (m/s) the water rises or falls towards its target. Slow enough to
+## read as a tide coming in rather than as a teleport, fast enough to iterate.
+@export_range(0.05, 20.0, 0.05) var tide_speed: float = 1.5
+## How far (m) one press of the tide keys moves the water.
+@export_range(0.1, 20.0, 0.1) var tide_step: float = 2.0
+## Limits (m, relative to the terrain datum) the tide may be driven between.
+## Low tide bottoms out on the shelf; high tide stops short of drowning the
+## island's dome, which sits VoxelDefs dome height above the datum.
+@export var tide_low: float = -6.0
+@export var tide_high: float = 10.0
 ## Half size (m) of the coarse mesh of the whole island. Has to reach past the
 ## point where the haze closes in from a mountain top, otherwise the world ends
 ## in a visible edge up there.
@@ -125,6 +147,11 @@ var _far: Node3D
 var _far_job: int = -1
 var _far_tiles: Array = []
 var _far_built := false
+## Water level the in flight far terrain job is painting for, and whether the
+## tide has moved on since it was dispatched. The job samples the level once at
+## dispatch rather than reading `water_level` off the main thread while it runs.
+var _far_job_water: float = VoxelDefs.SEA_DATUM
+var _far_dirty := false
 ## All keyed by Vector2i(chunk x, chunk z).
 ##
 ## A chunk is not a node. Its mesh is a bare RenderingServer instance, which is
@@ -275,11 +302,35 @@ func _create_far_terrain() -> void:
 	_far.name = "FarTerrain"
 	_far.visible = false
 	add_child(_far)
+	_dispatch_far_terrain()
+
+
+func _dispatch_far_terrain() -> void:
+	_far_dirty = false
+	_far_job_water = water_level
+	_mutex.lock()
+	_far_built = false
+	_far_tiles = []
+	_mutex.unlock()
 	_far_job = WorkerThreadPool.add_task(_far_job_run, false, "far_terrain")
 
 
+## Repaints the distant island for the level the water now stands at. The land
+## it carries has not changed - only which of it reads as ocean and how deep
+## that ocean looks - but that is baked into the mesh, so the mesh is rebuilt.
+##
+## A job already in flight is left to finish rather than cancelled, and the
+## rebuild is folded into the moment it lands.
+func _rebuild_far_terrain() -> void:
+	if _far_job >= 0:
+		_far_dirty = true
+		return
+	_dispatch_far_terrain()
+
+
 func _far_job_run() -> void:
-	var tiles := FarTerrain.build(gen, far_extent, far_step, far_drop)
+	var tiles := FarTerrain.build(gen, _far_job_water, far_extent, far_step,
+		far_drop)
 	_mutex.lock()
 	_far_tiles = tiles
 	_far_built = true
@@ -301,6 +352,11 @@ func _integrate_far_terrain() -> void:
 	_far_tiles = []
 	if _far == null:
 		return
+	# A repaint replaces the whole mesh; on the first build there is nothing
+	# hanging here yet and this does nothing.
+	for old in _far.get_children():
+		_far.remove_child(old)
+		old.queue_free()
 	for t in tiles:
 		var mi := MeshInstance3D.new()
 		mi.mesh = t["mesh"]
@@ -315,6 +371,13 @@ func _integrate_far_terrain() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON \
 			if t["has_land"] else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_far.add_child(mi)
+	# The tide moved again while this mesh was being painted, so the mesh that
+	# just landed is already out of date; go round again rather than announcing
+	# a level the water has left.
+	if _far_dirty:
+		_rebuild_far_terrain()
+	else:
+		tide_changed.emit(water_level)
 
 
 ## The sea is a single plane that is kept centred on the player. Its waves are
@@ -338,6 +401,54 @@ func _create_water() -> void:
 	_update_water()
 
 
+## Drives the water towards its target. The land is untouched by this: the
+## heightmap, the materials baked into the chunks and the collision under the
+## player are all functions of the fixed datum, so a tide is only ever the
+## surface moving over ground that was already there.
+func _advance_tide(delta: float) -> void:
+	if is_equal_approx(water_level, _tide_target):
+		return
+	water_level = move_toward(water_level, _tide_target, tide_speed * delta)
+	# The painted ocean out past the mist is baked, so it is repainted once the
+	# water comes to rest rather than on every frame of the climb. Until then
+	# the far mesh is a little stale, which the haze covers.
+	if is_equal_approx(water_level, _tide_target):
+		water_level = _tide_target
+		_rebuild_far_terrain()
+
+
+## Sets the level the water eases towards, clamped to the tide's range.
+## `immediate` snaps to it instead, which is what loading a save wants.
+func set_tide(water_y: float, immediate := false) -> void:
+	_tide_target = clampf(water_y, VoxelDefs.SEA_DATUM + tide_low,
+		VoxelDefs.SEA_DATUM + tide_high)
+	if immediate:
+		water_level = _tide_target
+		_rebuild_far_terrain()
+
+
+## The tide target, so a HUD can show where the water is heading.
+func tide_target() -> float:
+	return _tide_target
+
+
+## Height (m) of the water above the datum the land was shaped around.
+func tide_offset() -> float:
+	return water_level - VoxelDefs.SEA_DATUM
+
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey) or not event.is_pressed() or event.is_echo():
+		return
+	match (event as InputEventKey).keycode:
+		KEY_PAGEUP:
+			set_tide(_tide_target + tide_step)
+		KEY_PAGEDOWN:
+			set_tide(_tide_target - tide_step)
+		KEY_HOME:
+			set_tide(VoxelDefs.SEA_DATUM)
+
+
 func _update_water() -> void:
 	if _water == null:
 		return
@@ -345,7 +456,7 @@ func _update_water() -> void:
 	var pos := Vector3.ZERO if p == null else (p as Node3D).global_position
 	var step: float = maxf(water_extent / float(maxi(_water.mesh.subdivide_width + 1, 1)), 0.01)
 	_water.global_position = Vector3(
-		snappedf(pos.x, step), VoxelDefs.SEA_LEVEL, snappedf(pos.z, step))
+		snappedf(pos.x, step), water_level, snappedf(pos.z, step))
 
 
 func _exit_tree() -> void:
@@ -376,7 +487,7 @@ func _spawn_player() -> void:
 ## The island's dome is always above water, but the hills on top of it can dip,
 ## so the spawn walks outwards in a spiral until it finds solid dry ground.
 func _dry_spawn_point() -> Vector2:
-	var min_y := VoxelDefs.SEA_LEVEL + 0.6
+	var min_y := water_level + 0.6
 	if gen.height_meters(0.0, 0.0) >= min_y:
 		return Vector2.ZERO
 	for ring in range(1, 25):
@@ -390,6 +501,7 @@ func _dry_spawn_point() -> Vector2:
 
 
 func _process(delta: float) -> void:
+	_advance_tide(delta)
 	_update_center(false)
 	_update_water()
 	_integrate_far_terrain()
@@ -728,7 +840,7 @@ func _update_shadows(info: Dictionary, near: float) -> void:
 		else RenderingServer.SHADOW_CASTING_SETTING_OFF)
 func biome_name_at(pos: Vector3) -> String:
 	var g := gen.height_meters(pos.x, pos.z)
-	if g < VoxelDefs.SEA_LEVEL - 0.05:
+	if g < water_level - 0.05:
 		return "Ocean"
 	if g < gen.beach_top(pos.x, pos.z):
 		return "Beach"

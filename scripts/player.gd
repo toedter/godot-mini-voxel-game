@@ -52,7 +52,7 @@ func _input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	# How much of the 1.7 m capsule is under the sea surface.
-	_submersion = clampf((VoxelDefs.SEA_LEVEL - global_position.y) / 1.7, 0.0, 1.0)
+	_submersion = clampf((_water_y() - global_position.y) / 1.7, 0.0, 1.0)
 	# Chest deep is where the feet stop carrying the body. Standing on the sea
 	# bed counts too, otherwise the player would walk along the bottom of the
 	# bay instead of floating back up.
@@ -116,9 +116,16 @@ func _swim(delta: float) -> void:
 	velocity.y = clampf(velocity.y, -swim_vertical, swim_vertical)
 
 
+## World Y the water stands at right now. The tide moves it, so it is read
+## from the world rather than from the datum the land was shaped around; with
+## no world wired up the two are the same thing.
+func _water_y() -> float:
+	return VoxelDefs.SEA_DATUM if _world == null else _world.water_level
+
+
 ## True while the head is under the surface, so the camera can be tinted.
 func is_underwater() -> bool:
-	return global_position.y + 1.6 < VoxelDefs.SEA_LEVEL
+	return global_position.y + 1.6 < _water_y()
 
 
 ## Lets the capsule climb the small 10 cm terrain steps without stopping.

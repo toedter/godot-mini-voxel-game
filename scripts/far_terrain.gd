@@ -35,7 +35,6 @@ extends RefCounted
 ## frustum and shadow culling have something to work with. As one mesh the whole
 ## island would be redrawn into every shadow cascade every frame.
 
-const SEA := VoxelDefs.SEA_LEVEL
 ## Deepest the painted ocean surface may sit below the waterline, and the depth
 ## range over which it eases from the sea bed onto that level.
 const SEA_SHELF := 4.0
@@ -80,6 +79,12 @@ const CANOPY_GAIN := 12.0
 const CANOPY_MAX := 7.0
 
 var _gen: TerrainGen
+## World Y the water stood at when this mesh was painted. The land the mesh
+## carries is fixed, but everything it paints as ocean - which blocks may be
+## folded away, how deep each cell reads, where the surface levels out - is
+## measured from the waterline, so the mesh has to be rebuilt when the tide
+## moves. See VoxelWorld._rebuild_far_terrain.
+var _sea: float
 var _step: float
 var _drop: float
 var _block_m: float
@@ -111,12 +116,15 @@ var _can := PackedFloat32Array()
 ## Returns an array of {pos, mesh, canopy_surface, has_land}: where the tile
 ## goes, what to draw, which of its surfaces is the canopy shell (-1 when it
 ## carries no woods) and whether it holds anything worth casting a shadow.
-static func build(gen: TerrainGen, extent: float, step: float, drop: float) -> Array:
-	return FarTerrain.new()._run(gen, extent, step, drop)
+static func build(gen: TerrainGen, water_y: float, extent: float, step: float,
+		drop: float) -> Array:
+	return FarTerrain.new()._run(gen, water_y, extent, step, drop)
 
 
-func _run(gen: TerrainGen, extent: float, step: float, drop: float) -> Array:
+func _run(gen: TerrainGen, water_y: float, extent: float, step: float,
+		drop: float) -> Array:
 	_gen = gen
+	_sea = water_y
 	_step = step
 	_drop = drop
 	_block_m = step * float(BLOCK)
@@ -159,7 +167,7 @@ func _sample_blocks() -> void:
 ## cells bordering a folded block are themselves deep enough to be dropped by
 ## nothing, which is what lets the two agree along their shared edge.
 func _classify() -> void:
-	var limit := SEA - COARSE_DEPTH
+	var limit := _sea - COARSE_DEPTH
 	var deep := PackedByteArray()
 	deep.resize(_nb * _nb)
 	for bz in _nb:
@@ -263,7 +271,7 @@ func _resolve_fine() -> void:
 					if north and south:
 						bow = maxf(bow, (_fraw[gi - _side] + _fraw[gi + _side]) * 0.5 - raw)
 					_fy[gi] = _point_y(raw, grad, maxf(bow, 0.0))
-					if raw <= SEA:
+					if raw <= _sea:
 						continue
 					var mx := _at(gx)
 					var mz := _at(gz)
@@ -278,13 +286,13 @@ func _resolve_fine() -> void:
 ## is what lets a folded water block agree with its fine neighbours.
 func _point_y(raw: float, grad: float, bow: float) -> float:
 	var y := raw
-	var k := smoothstep(SEA - DROP_BAND, SEA + 1.0, raw)
+	var k := smoothstep(_sea - DROP_BAND, _sea + 1.0, raw)
 	if k > 0.0:
 		y -= k * minf(_drop + DROP_SLOPE * grad + DROP_BOW * bow, DROP_MAX)
-	var depth := SEA - y
+	var depth := _sea - y
 	if depth <= 0.0:
 		return y
-	return SEA - lerpf(depth, SEA_SHELF, smoothstep(SHELF_BEGIN, SHELF_END, depth))
+	return _sea - lerpf(depth, SEA_SHELF, smoothstep(SHELF_BEGIN, SHELF_END, depth))
 
 
 ## Where a fine block meets a folded one the folded side is a straight line
@@ -359,7 +367,7 @@ func _crown_height(mx: float, mz: float, ground: float, wood: float) -> float:
 ## Open water, shaded by how deep it is. Alpha marks the cell as water for the
 ## shader sky reflection.
 func _water_color(y: float) -> Color:
-	var depth: float = clampf((SEA - y) / DEPTH_FADE, 0.0, 1.0)
+	var depth: float = clampf((_sea - y) / DEPTH_FADE, 0.0, 1.0)
 	var c := SHALLOW_COLOR.lerp(DEEP_COLOR, depth)
 	c.a = 1.0
 	return c
@@ -491,8 +499,8 @@ func _emit_ground(bx0: int, bz0: int, bx1: int, bz1: int, ox: float, oz: float) 
 					var cz := gz0 + lz
 					var mid := (h00 + h10 + h01 + h11) * 0.25
 					var col: Color
-					if _fraw[i0] < SEA and _fraw[i0 + 1] < SEA \
-							and _fraw[i1] < SEA and _fraw[i1 + 1] < SEA:
+					if _fraw[i0] < _sea and _fraw[i0 + 1] < _sea \
+							and _fraw[i1] < _sea and _fraw[i1 + 1] < _sea:
 						col = _water_color(mid)
 					else:
 						var grad := maxf(absf(h10 - h00), absf(h01 - h00)) / _step

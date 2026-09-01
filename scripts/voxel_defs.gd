@@ -9,9 +9,18 @@ const VOXEL_SIZE := 0.1
 const CHUNK_SIZE := 64
 ## Side length of a chunk in meters.
 const CHUNK_METERS := CHUNK_SIZE * VOXEL_SIZE
-## World Y (meters) of the sea surface. Everything below it is under water.
-## The island is shaped around this value, so raising it floods the coast.
-const SEA_LEVEL := 18.0
+## World Y (meters) the island's terrain is shaped around: the height the coast
+## profile, the beach band and the alpine lines are all measured from.
+##
+## This is a property of the *land*, not of the water, and it must stay fixed.
+## The generator is a pure function of it, so moving it regenerates the island
+## - a different coastline, relocated snow lines, trees appearing and vanishing.
+##
+## The height the water actually stands at is `VoxelWorld.water_level`, which
+## is free to move at runtime and starts out equal to this datum. Anything
+## asking "am I under water", "how deep is this" or "where do I draw the sea"
+## wants that one. Only the terrain generator wants this one.
+const SEA_DATUM := 18.0
 
 const AIR := 0
 const GRASS := 1

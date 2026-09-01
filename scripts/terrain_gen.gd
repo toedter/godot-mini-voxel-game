@@ -21,8 +21,9 @@ const BIOME_WARP := 42.0
 ## at 0.5, only columns that are already close to the border can be flipped.
 const BIOME_EDGE_JITTER := 0.42
 
-## World Y of the sea surface.
-const SEA_LEVEL := VoxelDefs.SEA_LEVEL
+## World Y the island is shaped around. Fixed; see VoxelDefs.SEA_DATUM.
+## Not the height the water stands at - that is VoxelWorld.water_level.
+const SEA_DATUM := VoxelDefs.SEA_DATUM
 ## Distance (m) from the origin to the average waterline.
 const ISLAND_RADIUS := 400.0
 ## How far (m) the coastline noise may pull the waterline in or out. Large
@@ -65,9 +66,9 @@ const CRAG_RELIEF := 1.5
 ## World Y above which the soil has been scoured off and the mountain is bare
 ## rock, above which the snow stays all year, and above which the summit is
 ## capped with ice. All three are jittered before they are used.
-const ROCK_LINE := SEA_LEVEL + 30.0
-const SNOW_LINE := SEA_LEVEL + 48.0
-const ICE_LINE := SEA_LEVEL + 58.0
+const ROCK_LINE := SEA_DATUM + 30.0
+const SNOW_LINE := SEA_DATUM + 48.0
+const ICE_LINE := SEA_DATUM + 58.0
 ## The largest amount `_alpine_jitter` can move any of those three lines: the
 ## sum of the two amplitudes it adds, since noise is bounded by 1. Ground more
 ## than this below the rock line cannot be alpine whatever the noise says,
@@ -327,12 +328,12 @@ func height_at_biome(mx: float, mz: float, b: float) -> float:
 	# out to the open sea.
 	var near := smoothstep(1.0, 1.18, u)
 	var far := smoothstep(1.18, 1.95, u)
-	var depth := 6.0 * near + (SEA_LEVEL - SEA_FLOOR - 6.0) * far
+	var depth := 6.0 * near + (SEA_DATUM - SEA_FLOOR - 6.0) * far
 	# Carries on from the waterline up onto the island's dome. Its range meets
 	# the sea bed's at u = 1.0, which is therefore where the coast sits before
 	# the local relief pushes it in or out.
 	var land := smoothstep(1.0, 0.62, u)
-	var profile := SEA_LEVEL - depth + ISLAND_DOME * land
+	var profile := SEA_DATUM - depth + ISLAND_DOME * land
 
 	# Relief is damped under water so the sea bed stays a calm slope, but not
 	# removed: what is left keeps the coastline ragged and carves the odd
@@ -385,15 +386,18 @@ func collision_y(x: float, z: float) -> float:
 	return lerpf(h0, h1, fz) * VS
 
 
-## Whether the ground at this spot lies below the sea surface.
+## Whether the ground at this spot lies below the datum the island was shaped
+## around. This is a question about the land, not about the water: at a tide
+## other than the default the water is somewhere else, and "is this spot under
+## water right now" is `pos.y < VoxelWorld.water_level`.
 func is_submerged(x: float, z: float) -> bool:
-	return height_meters(x, z) < SEA_LEVEL
+	return height_meters(x, z) < SEA_DATUM
 
 
 ## Top of the beach: the height up to which the shore is washed often enough to
 ## stay bare sand. Jittered so the sand does not stop along a perfect contour.
 func beach_top(mx: float, mz: float) -> float:
-	return SEA_LEVEL + 1.25 + _n_edge.get_noise_2d(mx * 0.55, mz * 0.55) * 0.9
+	return SEA_DATUM + 1.25 + _n_edge.get_noise_2d(mx * 0.55, mz * 0.55) * 0.9
 
 
 ## Two scales of jitter for the alpine bands: a long wave that makes the tree
@@ -447,7 +451,7 @@ func material_from(mx: float, mz: float, surface: float, slope: int,
 	# The sea overrules the biome: the island is ringed by a beach that carries
 	# on below the waterline and darkens into the sea bed. Steep faces stay
 	# rock, so cliffs still drop straight into the water.
-	if surface < SEA_LEVEL + 2.2 and slope <= CLIFF_SLOPE:
+	if surface < SEA_DATUM + 2.2 and slope <= CLIFF_SLOPE:
 		# Both limits ride on the same jittered value, so neither the top of
 		# the beach nor the start of the sea bed runs along a clean contour.
 		var bt := beach_top(mx, mz)
@@ -572,7 +576,7 @@ func feature_in_cell(cell_x: int, cell_z: int) -> Dictionary:
 	# Nothing takes root in the surf. Boulders are allowed a little lower than
 	# the plants, so the shore keeps a few rocks standing in the shallows.
 	var ground := height_meters(mx, mz)
-	if ground < SEA_LEVEL - 1.2:
+	if ground < SEA_DATUM - 1.2:
 		return {}
 	# Above the tree line only loose rock is left, and the iced over summits
 	# carry nothing at all.

@@ -27,16 +27,23 @@ func _process(_delta: float) -> void:
 		return
 	var p := _player.global_position
 	var hint := "WASD move   Shift sprint   Space jump / swim up   Ctrl dive   Mouse look   Esc release cursor"
+	hint += "   PgUp/PgDn tide   Home reset tide"
 	if _music != null:
 		hint += "   M music: %s" % ("on" if _music.is_music_enabled() else "off")
 	if _day != null:
 		hint += "   P pause time"
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		hint = "Click into the window to capture the mouse and look around"
-	_label.text = "%d FPS   |   %s   |   %s   |   XYZ %.1f / %.1f / %.1f   |   chunks %d\n%s" % [
+	# The tide reads as its offset from the datum the land was shaped around,
+	# which is the number that means something: 0.0 is the island as generated.
+	var tide := "tide %+.1f m" % _world.tide_offset()
+	if not is_equal_approx(_world.water_level, _world.tide_target()):
+		tide += " -> %+.1f" % (_world.tide_target() - VoxelDefs.SEA_DATUM)
+	_label.text = "%d FPS   |   %s   |   %s   |   %s   |   XYZ %.1f / %.1f / %.1f   |   chunks %d\n%s" % [
 		Engine.get_frames_per_second(),
 		_world.biome_name_at(p),
 		_day.clock_text() if _day != null else "--:--",
+		tide,
 		p.x, p.y, p.z,
 		_world.loaded_chunks(),
 		hint,

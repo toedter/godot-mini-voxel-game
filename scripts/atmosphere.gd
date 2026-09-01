@@ -148,7 +148,9 @@ func _process(delta: float) -> void:
 	# The distant island's canopy hands over at a distance from the eye, and the
 	# shadow pass has to agree with the colour pass about where that is.
 	_world.set_eye(eye)
-	var wet := 1.0 if eye_y < VoxelDefs.SEA_LEVEL else 0.0
+	# Against the tide's level, not the datum the land was shaped around, so
+	# the murk closes over the eye wherever the water actually stands.
+	var wet := 1.0 if eye_y < _world.water_level else 0.0
 	# Short fade so ducking through the surface is a wipe rather than a snap.
 	_wet = move_toward(_wet, wet, delta * 6.0)
 	# The coarse mesh of the island stands in for everything the streamed
