@@ -45,6 +45,12 @@ func _physics_process(_delta: float) -> void:
 	# through the floor and out onto the island.
 	if _world.indoors:
 		return
+	# A body on its way up has just been pushed, so it is not resting on
+	# anything. Without this the pin catches a jump on its first frame - at
+	# 90 Hz a 5 m/s launch clears barely more than `pin_band` in one step -
+	# and cancels it before it leaves the ground.
+	if _body.velocity.y > 0.0:
+		return
 	var p := _body.global_position
 	# The height the collision shape really has. The voxel lip from ground_y()
 	# stands up to half a voxel above it on a slope, and correcting to that

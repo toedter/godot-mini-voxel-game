@@ -467,14 +467,14 @@ func _input(event: InputEvent) -> void:
 		KEY_HOME:
 			set_tide(VoxelDefs.SEA_DATUM)
 		KEY_T:
-			_teleport_to_structures()
+			teleport_to_structures()
 
 
 ## Debug scaffolding, same family as the tide keys. The shallows are only ever
 ## at the coast, so the drowned ruin stands a few hundred metres from a spawn
 ## that is by construction up on the island's dome; walking there to check a
 ## change is not iteration.
-func _teleport_to_structures() -> void:
+func teleport_to_structures() -> void:
 	if gen == null or gen.structures == null or gen.structures.size() == 0:
 		return
 	var first := gen.structures.all()[0]
