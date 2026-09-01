@@ -21,11 +21,20 @@ extends Node3D
 @export var xr_action: StringName = &"trigger"
 ## How far the analogue trigger has to be pulled to count as a press.
 @export_range(0.1, 1.0, 0.05) var xr_threshold: float = 0.6
+## Where a carried object rides, in this node's own space. The desktop wants it
+## held off to one side and below the eye so it does not cover the view; a hand
+## wants it more or less where the hand is, so the XR rig overrides this.
+@export var carry_offset: Vector3 = Vector3(0.26, -0.2, -0.5)
+## How fast a picked up object slides into that pose, rather than snapping.
+@export_range(1.0, 60.0, 1.0) var carry_lerp: float = 18.0
 
 ## Fires when the ray moves onto a different Interactable (or onto nothing).
 signal focus_changed(target: Interactable)
+## Fires when this picks something up or puts it down. Null means empty handed.
+signal carry_changed(item: Node3D)
 
 var _focus: Interactable
+var _carried: Node3D
 var _controller: XRController3D
 var _xr_was_down := false
 ## Bodies the ray must ignore: the player's own collider.
@@ -55,6 +64,27 @@ func focus() -> Interactable:
 	return _focus
 
 
+## What the player is holding, or null.
+func carried() -> Node3D:
+	return _carried
+
+
+## Takes an object into the hand. The object reparents itself here so that it
+## rides the camera or the controller with no per frame work of its own beyond
+## easing into the carry pose.
+func take(item: Node3D) -> void:
+	_carried = item
+	carry_changed.emit(item)
+
+
+## Gives up whatever is held, and hands it back so the caller can place it.
+func release() -> Node3D:
+	var item := _carried
+	_carried = null
+	carry_changed.emit(null)
+	return item
+
+
 ## The line the flat HUD shows, empty when nothing is in reach.
 func focus_prompt() -> String:
 	return "" if _focus == null else _focus.prompt
@@ -78,6 +108,10 @@ func _update_focus() -> void:
 	var found: Interactable = null
 	if not hit.is_empty():
 		found = hit["collider"] as Interactable
+	# Whatever is in the hand sits right in front of the ray. It is not a
+	# target; the player wants to aim past it at where it is going.
+	if found != null and found == _carried:
+		found = null
 	if found == _focus:
 		return
 	if _focus != null:

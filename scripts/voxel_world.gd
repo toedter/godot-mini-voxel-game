@@ -133,6 +133,9 @@ var _tide_target: float = VoxelDefs.SEA_DATUM
 @export var player_path: NodePath = ^"../Player"
 
 var gen: TerrainGen
+## World XZ the player was put down at. Searched for at runtime, so props that
+## want to be placed near the player have to read it rather than assume one.
+var spawn_xz := Vector2.ZERO
 
 ## The three materials a chunk's surfaces are drawn with: static voxels, wind
 ## swayed grass tufts, and the mushroom caps that glow at night.
@@ -185,6 +188,9 @@ var _glow_time := 0.0
 
 
 func _ready() -> void:
+	# Props reparent themselves as they are picked up and put down, so they
+	# cannot hold a NodePath to the world; they look it up by group instead.
+	add_to_group("voxel_world")
 	gen = TerrainGen.new(world_seed)
 	_ensure_materials()
 	_create_water()
@@ -477,10 +483,11 @@ func _exit_tree() -> void:
 
 
 func _spawn_player() -> void:
+	spawn_xz = _dry_spawn_point()
 	var p := get_node_or_null(player_path)
 	if p == null:
 		return
-	var spot := _dry_spawn_point()
+	var spot := spawn_xz
 	p.global_position = Vector3(spot.x, gen.ground_y(spot.x, spot.y) + 2.0, spot.y)
 
 

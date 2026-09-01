@@ -14,13 +14,15 @@ extends Interactable
 @export var notches: PackedFloat32Array = PackedFloat32Array([-5.0, 0.0, 6.0])
 @export var notch_names: PackedStringArray = PackedStringArray(["low water", "mean water", "high water"])
 @export var world_path: NodePath = ^"../VoxelWorld"
-## Placed relative to wherever the player actually spawned, since the spawn
-## point is searched for at runtime and is not known when this scene is built.
-@export var place_near_player: bool = true
-@export var player_path: NodePath = ^"../Player"
-## Close enough that the player spawns within the Interactor's reach of it,
-## and off to one side so it is not the first thing filling the view.
-@export var spawn_offset: Vector3 = Vector3(1.2, 0.0, -2.2)
+## A seized lock will not turn until something releases it. This is what makes
+## the lock the end of a puzzle rather than a button: the pedestal nearby has
+## to be filled first.
+@export var locked: bool = false
+@export var locked_prompt: String = "The lock is seized"
+## A pedestal that has to be filled before this lock will turn. Emptying it
+## seizes the lock again, so the glow-cap stays the key rather than becoming a
+## switch that is thrown once and forgotten.
+@export var unlocked_by: NodePath
 
 var _world: VoxelWorld
 var _index := 1
@@ -31,7 +33,7 @@ func _ready() -> void:
 	super()
 	_world = get_node_or_null(world_path) as VoxelWorld
 	_build_body()
-	_place()
+	_bind_key()
 	# Start on whichever notch the water is already at, so the first turn moves
 	# somewhere the player has not just been.
 	if _world != null:
@@ -83,15 +85,31 @@ func _build_body() -> void:
 	add_child(shape)
 
 
-## Drops the lock onto the ground. The heightmap is a pure function, so this
-## needs no streamed chunk to be loaded first.
-func _place() -> void:
-	if place_near_player:
-		var p := get_node_or_null(player_path) as Node3D
-		if p != null:
-			global_position = p.global_position + spawn_offset
-	if _world != null and _world.gen != null:
-		global_position.y = _world.gen.collision_y(global_position.x, global_position.z)
+## Watches the pedestal that holds this lock's key, if there is one.
+func _bind_key() -> void:
+	var key := get_node_or_null(unlocked_by) as Pedestal
+	if key == null:
+		return
+	key.filled.connect(_on_key_placed)
+	key.emptied.connect(_on_key_removed)
+	locked = not key.is_filled()
+
+
+func _on_key_placed(_item: Carryable) -> void:
+	unlock()
+
+
+func _on_key_removed(_item: Carryable) -> void:
+	locked = true
+	_update_prompt()
+
+
+## Releases the lock, so it can be turned. Wired to a pedestal being filled.
+func unlock() -> void:
+	if not locked:
+		return
+	locked = false
+	_update_prompt()
 
 
 func _nearest_notch(offset: float) -> int:
@@ -107,13 +125,17 @@ func _name_of(i: int) -> String:
 
 
 func _update_prompt() -> void:
+	if locked:
+		prompt = locked_prompt
+		refresh_prompt()
+		return
 	var next := (_index + 1) % notches.size()
 	prompt = "Turn the lock to %s" % _name_of(next)
 	refresh_prompt()
 
 
 func _on_use(_actor: Node3D) -> void:
-	if _world == null or notches.is_empty():
+	if locked or _world == null or notches.is_empty():
 		return
 	_index = (_index + 1) % notches.size()
 	_world.set_tide(VoxelDefs.SEA_DATUM + notches[_index])

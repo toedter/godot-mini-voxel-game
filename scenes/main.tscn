@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=18 format=3]
 
 [ext_resource type="Script" path="res://scripts/voxel_world.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/player.gd" id="2_player"]
@@ -9,6 +9,9 @@
 [ext_resource type="Script" path="res://scripts/xr_mode.gd" id="7_xr"]
 [ext_resource type="Script" path="res://scripts/interactor.gd" id="8_interactor"]
 [ext_resource type="Script" path="res://scripts/tide_lock.gd" id="9_lock"]
+[ext_resource type="Script" path="res://scripts/spawn_place.gd" id="10_place"]
+[ext_resource type="Script" path="res://scripts/pedestal.gd" id="11_pedestal"]
+[ext_resource type="Script" path="res://scripts/glow_cap.gd" id="12_cap"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_1"]
 sky_top_color = Color(0.25, 0.48, 0.9, 1)
@@ -105,6 +108,27 @@ script = ExtResource("8_interactor")
 [node name="TideLock" type="StaticBody3D" parent="."]
 script = ExtResource("9_lock")
 prompt = "Turn the lock"
+locked = true
+unlocked_by = NodePath("../Pedestal")
+
+[node name="Place" type="Node" parent="TideLock"]
+script = ExtResource("10_place")
+offset = Vector3(1.2, 0, -2.2)
+
+[node name="Pedestal" type="StaticBody3D" parent="."]
+script = ExtResource("11_pedestal")
+accepts = &"glow_cap"
+
+[node name="Place" type="Node" parent="Pedestal"]
+script = ExtResource("10_place")
+offset = Vector3(-1.9, 0, -2.4)
+
+[node name="GlowCap" type="StaticBody3D" parent="."]
+script = ExtResource("12_cap")
+
+[node name="Place" type="Node" parent="GlowCap"]
+script = ExtResource("10_place")
+offset = Vector3(4, 0, 3)
 
 [node name="HUD" type="CanvasLayer" parent="."]
 script = ExtResource("3_hud")
