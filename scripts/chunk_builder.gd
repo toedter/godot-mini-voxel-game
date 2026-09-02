@@ -491,6 +491,8 @@ func _place_structures() -> void:
 				_build_pillar(it)
 			StructureSet.ARCH:
 				_build_arch(it)
+			StructureSet.TERRACE:
+				_build_terrace(it)
 
 
 ## 0..1 from a world column, for shapes that have to look the same from
@@ -610,6 +612,74 @@ func _build_arch(it: Dictionary) -> void:
 			var top := base + height - int(_stone_hash(wx, wz, 0x77) * 2.99)
 			for y in range(jamb_top, top):
 				_put(lx, y, lz, mat)
+
+
+## The plinth the tide lock stands on: four walls carrying a slab, with a stair
+## up one side.
+##
+## Hollow on purpose. Solid, a deck this tall is some forty thousand voxels in
+## one chunk, and every one of them would be walked again by the face pass; a
+## shell is a tenth of that and looks identical, since the inside is sealed.
+func _build_terrace(it: Dictionary) -> void:
+	var mat: int = it["mat"]
+	var base: int = it["base"]
+	var top: int = it["top"]
+	var cx: int = it["x"]
+	var cz: int = it["z"]
+	var half: int = it["half"]
+	var wall: int = it["wall"]
+	var slab: int = it["slab"]
+	var xr := _clip(cx, half, _ox)
+	var zr := _clip(cz, half, _oz)
+	for dz in range(zr.x, zr.y + 1):
+		for dx in range(xr.x, xr.y + 1):
+			var lx := cx + dx - _ox
+			var lz := cz + dz - _oz
+			var foot := _footing_start(lx, lz, base)
+			# The walls carry down to the ground; over the middle there is only
+			# the deck slab, and the ground shows through underneath.
+			var from := foot if absi(dx) > half - wall or absi(dz) > half - wall \
+				else maxi(top - slab, foot)
+			for y in range(from, top):
+				_put(lx, y, lz, mat)
+	_build_stair(it)
+
+
+## The stair off one side of a terrace: a run of treads on two side walls.
+##
+## Each step is a tread's worth of columns one rise below the last, and a step
+## whose tread has already met the ground builds nothing, so the run finds the
+## slope it is standing on instead of having to be told about it.
+func _build_stair(it: Dictionary) -> void:
+	var mat: int = it["mat"]
+	var base: int = it["base"]
+	var top: int = it["top"]
+	var cx: int = it["x"]
+	var cz: int = it["z"]
+	var axis: int = it["axis"]
+	var dir: int = it["dir"]
+	var half: int = it["half"]
+	var wall: int = it["wall"]
+	var slab: int = it["slab"]
+	var rise: int = it["rise"]
+	var tread: int = it["tread"]
+	var swide: int = it["stair_half"]
+	for s in int(it["steps"]):
+		var step_top := top - (s + 1) * rise
+		if step_top <= 0:
+			return
+		for t in tread:
+			var out := (half + s * tread + t + 1) * dir
+			for v in range(-swide, swide + 1):
+				var lx := cx + (out if axis == 0 else v) - _ox
+				var lz := cz + (v if axis == 0 else out) - _oz
+				if lx < 0 or lx >= CS or lz < 0 or lz >= CS:
+					continue
+				var foot := _footing_start(lx, lz, base)
+				var from := foot if absi(v) > swide - wall \
+					else maxi(step_top - slab, foot)
+				for y in range(from, step_top):
+					_put(lx, y, lz, mat)
 
 
 func _add_tree(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:

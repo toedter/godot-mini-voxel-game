@@ -55,7 +55,7 @@ func _physics_process(_delta: float) -> void:
 	# The height the collision shape really has. The voxel lip from ground_y()
 	# stands up to half a voxel above it on a slope, and correcting to that
 	# every frame is itself a bump.
-	var g: float = _world.gen.collision_y(p.x, p.z)
+	var g: float = _world.surface_y(p.x, p.z)
 	if p.y > g + pin_band:
 		return # in the air, or standing on something that is not the ground
 	_body.global_position.y = g

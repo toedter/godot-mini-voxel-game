@@ -20,6 +20,27 @@ extends RefCounted
 const WALL := &"wall"
 const PILLAR := &"pillar"
 const ARCH := &"arch"
+## A plinth of masonry with a stair up one side. Not a ruin: this is the thing
+## the tide lock stands on, and it exists so the lock can be reached at every
+## notch the lock itself offers.
+const TERRACE := &"terrace"
+
+## Terrace masonry, in voxels. The stair's 30 cm rise on a 40 cm tread is
+## comfortably inside the player's 45 cm step, and reads as a stair rather than
+## as a ramp; the walls are thin because the plinth is a shell, which nothing
+## can see into and nothing can reach.
+const STAIR_RISE := 3
+const STAIR_TREAD := 4
+const TERRACE_WALL := 2
+const TERRACE_SLAB := 4
+## Half the deck, and half the width of the stair, in voxels: a 3.6 m square
+## with a 1.4 m stair off one side.
+const TERRACE_HALF := 18
+const STAIR_HALF := 7
+## How far (m) the deck stands above the tide's flood notch. Enough to keep the
+## player's feet dry with the sea at its highest, little enough that high water
+## is visibly lapping at the masonry rather than somewhere below.
+const TERRACE_FREEBOARD := 0.8
 
 ## Every placement is a dictionary:
 ##   kind   one of the constants above
@@ -30,6 +51,17 @@ const ARCH := &"arch"
 ##   plus the kind's own parameters, all counted in voxels.
 var _items: Array[Dictionary] = []
 
+## Where the drowned ruin ended up, in metres, or Vector2.INF while there is
+## none. Written once as the set is built, like the placements themselves, so
+## the worker threads may read it just as freely.
+var _ruin_centre := Vector2.INF
+
+## Where the lock's terrace stands, in metres, and the world Y (m) of its deck.
+## Same contract as the ruin's centre: written while the set is built, read
+## from anywhere afterwards.
+var _terrace_centre := Vector2.INF
+var _terrace_top := 0.0
+
 
 func size() -> int:
 	return _items.size()
@@ -37,6 +69,38 @@ func size() -> int:
 
 func all() -> Array[Dictionary]:
 	return _items
+
+
+## The centre of the drowned ruin, in metres, or Vector2.INF when the island
+## has none. Everything laid out around the ruin - the player's start, the
+## lock, its socket - measures from here rather than guessing from the anchor
+## of one of its walls.
+func ruin_centre() -> Vector2:
+	return _ruin_centre
+
+
+## Where the lock's terrace stands, in metres, or Vector2.INF when the island
+## has none.
+func terrace_centre() -> Vector2:
+	return _terrace_centre
+
+
+## World Y (m) of the terrace deck over a spot, or -INF anywhere the terrace is
+## not. This is what a prop dropped there lands on, and the floor the player's
+## fallback clamp holds them at while the chunk's collision is still being
+## built - without it they would spawn on the deck and sink through it into the
+## masonry before the mesher caught up.
+##
+## The stair is deliberately not in here. It is a slope, its height is the
+## builder's business, and anything standing on it is standing on collision
+## that has already been built.
+func deck_y(mx: float, mz: float) -> float:
+	if _terrace_centre == Vector2.INF:
+		return -INF
+	var half := float(TERRACE_HALF) * VoxelDefs.VOXEL_SIZE
+	if absf(mx - _terrace_centre.x) > half or absf(mz - _terrace_centre.y) > half:
+		return -INF
+	return _terrace_top
 
 
 ## The first placement of a kind, or an empty dictionary. Used by anything that
@@ -101,6 +165,30 @@ func add_arch(gen: TerrainGen, wx: int, wz: int, axis: int, width: int,
 	})
 
 
+## A plinth to stand the tide lock on, and a stair up to it. `top` is a world
+## voxel Y rather than a height, because the whole point of the thing is to put
+## its deck at a level the tide cannot reach.
+##
+## `axis` 0 runs the stair along X, 1 along Z, and `dir` says which end of that
+## axis it comes off. The stair is only ever axis aligned - the voxel grid has
+## no other direction - so the caller picks whichever of the four sides points
+## nearest the way it wants.
+func add_terrace(gen: TerrainGen, wx: int, wz: int, top: int, axis: int,
+		dir: int, mat: int) -> void:
+	var base := _ground(gen, wx, wz)
+	# One step per rise from the deck down to the foundation, and a few spare
+	# for ground that keeps falling away. A step whose tread is already under
+	# the terrain builds nothing, so overshooting costs only the loop.
+	var steps := (top - base) / STAIR_RISE + 4
+	_items.append({
+		"kind": TERRACE, "x": wx, "z": wz, "base": base,
+		"r": TERRACE_HALF + steps * STAIR_TREAD + 2, "half": TERRACE_HALF,
+		"top": top, "axis": axis, "dir": dir, "steps": steps,
+		"rise": STAIR_RISE, "tread": STAIR_TREAD, "stair_half": STAIR_HALF,
+		"wall": TERRACE_WALL, "slab": TERRACE_SLAB, "mat": mat,
+	})
+
+
 ## Foundation height at a spot, in voxels.
 func _ground(gen: TerrainGen, wx: int, wz: int) -> int:
 	return gen.height_at(wx, wz)
@@ -123,12 +211,39 @@ static func for_island(gen: TerrainGen) -> StructureSet:
 	if site == Vector2i.MAX:
 		return set
 	set._build_drowned_ruin(gen, site.x, site.y)
+	set._build_lock_terrace(gen)
 	return set
+
+
+## The plinth the tide lock stands on, on the shore beside the ruin.
+##
+## The lock has to survive its own high water: standing it on the beach means
+## the one notch that floods the bay puts the lock several metres under, and a
+## control the player can drown by using it is a trap rather than a puzzle. The
+## coast here shelves too gently to offer any ground that high, so the masonry
+## makes some.
+func _build_lock_terrace(gen: TerrainGen) -> void:
+	var shore := shore_site(gen)
+	if shore == Vector2.INF:
+		return
+	var top := int(round((VoxelDefs.SEA_DATUM + VoxelDefs.TIDE_FLOOD
+		+ TERRACE_FREEBOARD) / VoxelDefs.VOXEL_SIZE))
+	var wx := int(floor(shore.x / VoxelDefs.VOXEL_SIZE))
+	var wz := int(floor(shore.y / VoxelDefs.VOXEL_SIZE))
+	# The stair comes off the side facing away from the ruin, so the player
+	# climbs towards it and the deck's seaward edge stays clear to look over.
+	var away := shore - _ruin_centre
+	var axis := 0 if absf(away.x) >= absf(away.y) else 1
+	var along := away.x if axis == 0 else away.y
+	_terrace_centre = Vector2(float(wx), float(wz)) * VoxelDefs.VOXEL_SIZE
+	_terrace_top = float(top) * VoxelDefs.VOXEL_SIZE
+	add_terrace(gen, wx, wz, top, axis, 1 if along >= 0.0 else -1, VoxelDefs.STONE)
 
 
 ## A ruin standing in the shallows: under water at the default tide, high and
 ## dry at low water. The whole point of the tide in one building.
 func _build_drowned_ruin(gen: TerrainGen, cx: int, cz: int) -> void:
+	_ruin_centre = Vector2(float(cx), float(cz)) * VoxelDefs.VOXEL_SIZE
 	var stone := VoxelDefs.STONE
 	var sandstone := VoxelDefs.SANDSTONE
 	# A room roughly 7 m square, its seaward side fallen away, with the doorway
@@ -143,12 +258,56 @@ func _build_drowned_ruin(gen: TerrainGen, cx: int, cz: int) -> void:
 	add_pillar(gen, cx + 16, cz - 12, 13, 4, stone)
 
 
+## Dry ground beside the ruin: where the terrace goes, and with it the player's
+## start and the frame the lock, the socket and the cap are laid out in.
+## Vector2.INF when there is no ruin or nowhere around it to stand, and the
+## caller falls back to its own spawn search.
+##
+## Rings outwards from the ruin in metres, so the nearest shore wins. Ground
+## that clears high water on its own is taken at once, since a terrace on it
+## need be no more than a step; failing that, the driest of the spots within
+## ten metres of that first shore, and the masonry makes up the rest.
+func shore_site(gen: TerrainGen) -> Vector2:
+	if _ruin_centre == Vector2.INF:
+		return Vector2.INF
+	var datum := VoxelDefs.SEA_DATUM
+	var best := Vector2.INF
+	var best_h := -INF
+	var found := -1
+	# Out from clear of the ruin's own walls, in 2 m steps, as far as a coast
+	# that shelves gently can put its first dry ground.
+	for ring in range(5, 61):
+		# Ten metres past the nearest shore is far enough to take the drier of
+		# two neighbouring spots. Beyond that the player is being walked away
+		# from the ruin for a hand's breadth of height.
+		if found >= 0 and ring > found + 5:
+			break
+		var r := float(ring) * 2.0
+		for i in 24:
+			var a := TAU * float(i) / 24.0
+			var c := _ruin_centre + Vector2(cos(a) * r, sin(a) * r)
+			var h := gen.height_meters(c.x, c.y)
+			# Two metres of freeboard at the default tide: dry to stand on,
+			# low enough that the ruin is still what the player looks at.
+			if h < datum + 2.0 or not _flat_enough(gen, c.x, c.y):
+				continue
+			if found < 0:
+				found = ring
+			if h >= datum + VoxelDefs.TIDE_FLOOD + TERRACE_FREEBOARD:
+				return c
+			if h > best_h:
+				best_h = h
+				best = c
+	return best
+
+
 ## Finds a patch of sea bed shallow enough to be uncovered at low water and
 ## deep enough to be under the surface at the default tide, and flat enough to
 ## stand a building on.
 ##
-## Walks outwards from the origin in rings, like the player spawn search, so
-## the ruin ends up within reach of wherever the player starts.
+## Walks outwards from the origin in rings, so the ruin is the first such patch
+## out from the middle of the island. The player then starts on the shore beside
+## it, rather than the ruin being a walk away from where they woke up.
 static func _shallow_site(gen: TerrainGen) -> Vector2i:
 	var datum := VoxelDefs.SEA_DATUM
 	for ring in range(6, 90):
@@ -169,8 +328,8 @@ static func _shallow_site(gen: TerrainGen) -> Vector2i:
 	return Vector2i.MAX
 
 
-## True when the sea bed over the ruin's footprint does not vary by more than a
-## metre, so the building does not end up half swallowed by a slope.
+## True when the ground over a building or a prop's footprint does not vary by
+## more than a metre, so nothing ends up half swallowed by a slope.
 static func _flat_enough(gen: TerrainGen, mx: float, mz: float) -> bool:
 	var lo := INF
 	var hi := -INF

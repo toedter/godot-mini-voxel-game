@@ -168,7 +168,7 @@ func _try_step_up(before: Vector3, motion: Vector3) -> void:
 func _clamp_to_terrain() -> void:
 	if _world == null or _world.gen == null or _world.indoors:
 		return
-	var g := _world.gen.collision_y(global_position.x, global_position.z)
+	var g := _world.surface_y(global_position.x, global_position.z)
 	if global_position.y < g:
 		global_position.y = g
 		if velocity.y < 0.0:

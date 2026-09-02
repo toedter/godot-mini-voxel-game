@@ -145,6 +145,11 @@ var indoors := false
 ## World XZ the player was put down at. Searched for at runtime, so props that
 ## want to be placed near the player have to read it rather than assume one.
 var spawn_xz := Vector2.ZERO
+## Unit XZ direction the player is put down looking along: at the drowned ruin
+## when the island has one. Props placed near the spawn are laid out in this
+## frame, so "two metres towards the ruin" means the same thing whichever way
+## round the seed put the coast.
+var spawn_facing := Vector2(0.0, -1.0)
 
 ## The three materials a chunk's surfaces are drawn with: static voxels, wind
 ## swayed grass tufts, and the mushroom caps that glow at night.
@@ -470,10 +475,9 @@ func _input(event: InputEvent) -> void:
 			teleport_to_structures()
 
 
-## Debug scaffolding, same family as the tide keys. The shallows are only ever
-## at the coast, so the drowned ruin stands a few hundred metres from a spawn
-## that is by construction up on the island's dome; walking there to check a
-## change is not iteration.
+## Debug scaffolding, same family as the tide keys. The player now starts on
+## the shore beside the drowned ruin, so this is the way back after wandering
+## off across the island rather than the way there.
 func teleport_to_structures() -> void:
 	if gen == null or gen.structures == null or gen.structures.size() == 0:
 		return
@@ -519,13 +523,41 @@ func _exit_tree() -> void:
 	_mushroom_lights.clear()
 
 
+## The height (m) a body or a prop at this spot rests on: the terrain, or the
+## lock terrace's deck where that stands over it. The terrain generator knows
+## nothing about masonry - it is a heightmap, one surface per column - so
+## anything that has to hold something up at a spot rather than draw it asks
+## here instead of asking the generator.
+func surface_y(x: float, z: float) -> float:
+	var y := gen.collision_y(x, z)
+	if gen.structures != null:
+		y = maxf(y, gen.structures.deck_y(x, z))
+	return y
+
+
+## Puts the player down on the terrace beside the drowned ruin, looking at it.
+## The ruin is the island's one puzzle, so the tide, the lock that moves it and
+## the archway it opens all want to be in the same view rather than a few
+## hundred metres apart. Only an island whose seed grew no ruin falls back to
+## the old spiral out of the origin.
 func _spawn_player() -> void:
-	spawn_xz = _dry_spawn_point()
+	var site := Vector2.INF
+	if gen.structures != null:
+		site = gen.structures.terrace_centre()
+	if site == Vector2.INF:
+		spawn_xz = _dry_spawn_point()
+		spawn_facing = Vector2(0.0, -1.0)
+	else:
+		spawn_xz = site
+		spawn_facing = (gen.structures.ruin_centre() - site).normalized()
 	var p := get_node_or_null(player_path)
 	if p == null:
 		return
 	var spot := spawn_xz
-	p.global_position = Vector3(spot.x, gen.ground_y(spot.x, spot.y) + 2.0, spot.y)
+	p.global_position = Vector3(spot.x, surface_y(spot.x, spot.y) + 2.0, spot.y)
+	# Forward is -Z, for the desktop body and for the XR rig alike: mouse look
+	# and snap turn both carry their yaw on the body itself.
+	p.global_rotation.y = atan2(-spawn_facing.x, -spawn_facing.y)
 
 
 ## The island's dome is always above water, but the hills on top of it can dip,

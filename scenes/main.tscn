@@ -115,7 +115,7 @@ unlocked_by = NodePath("../Pedestal")
 
 [node name="Place" type="Node" parent="TideLock"]
 script = ExtResource("10_place")
-offset = Vector3(1.2, 0, -2.2)
+offset = Vector3(1, 0, -1.1)
 
 [node name="Pedestal" type="StaticBody3D" parent="."]
 script = ExtResource("11_pedestal")
@@ -123,15 +123,14 @@ accepts = &"glow_cap"
 
 [node name="Place" type="Node" parent="Pedestal"]
 script = ExtResource("10_place")
-anchor = 1
+offset = Vector3(-1, 0, -1.1)
 
 [node name="GlowCap" type="StaticBody3D" parent="."]
 script = ExtResource("12_cap")
 
 [node name="Place" type="Node" parent="GlowCap"]
 script = ExtResource("10_place")
-anchor = 1
-offset = Vector3(5, 0, 3.5)
+offset = Vector3(-4, 0, -0.5)
 
 [node name="Vault" type="Node3D" parent="."]
 script = ExtResource("13_interior")
@@ -166,9 +165,4 @@ color = Color(1, 1, 1, 0.75)
 
 [node name="Music" type="AudioStreamPlayer" parent="."]
 script = ExtResource("4_music")
-
-
-
-
-
 

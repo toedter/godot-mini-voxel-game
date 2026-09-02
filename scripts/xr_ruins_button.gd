@@ -3,9 +3,9 @@ extends Node3D
 ## The debug jump to the ruins, on a controller button.
 ##
 ## The tide keys and the T key are how this is reached at a desk; in a headset
-## there is no keyboard, and the drowned ruin is a few hundred metres from
-## spawn. Same scaffolding, same lifetime: it goes when the island has real
-## landmarks to walk between.
+## there is no keyboard, and the walk back after wandering off across the
+## island is not iteration. Same scaffolding, same lifetime: it goes when the
+## island has real landmarks to walk between.
 
 ## Boolean OpenXR action. Bound to X on the left Touch controller.
 @export var action: StringName = &"go_to_ruins"

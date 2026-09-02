@@ -11,6 +11,11 @@ extends Interactable
 ## The notches this lock cycles through, in metres relative to the terrain
 ## datum. Ebb exposes the shallows, mean is the island as generated, flood
 ## floats the player up to the ledges.
+##
+## The flood notch is the one the world is built around: the terrace this lock
+## stands on is raised clear of `VoxelDefs.TIDE_FLOOD`, and the masonry is
+## generated on worker threads that cannot see this array. Move the top notch
+## above that constant and the lock drowns itself.
 @export var notches: PackedFloat32Array = PackedFloat32Array([-5.0, 0.0, 6.0])
 @export var notch_names: PackedStringArray = PackedStringArray(["low water", "mean water", "high water"])
 @export var world_path: NodePath = ^"../VoxelWorld"

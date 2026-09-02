@@ -22,6 +22,14 @@ const CHUNK_METERS := CHUNK_SIZE * VOXEL_SIZE
 ## wants that one. Only the terrain generator wants this one.
 const SEA_DATUM := 18.0
 
+## How far above the datum the tide's flood notch stands, in metres.
+##
+## The lock's own `notches` are the authored copy of this and are free to
+## differ; what needs the number here is the masonry, which is generated on
+## worker threads that can see neither the scene nor the lock, and which has to
+## carry the lock above the water it lets in.
+const TIDE_FLOOD := 6.0
+
 const AIR := 0
 const GRASS := 1
 const DIRT := 2
