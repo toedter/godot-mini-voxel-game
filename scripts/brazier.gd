@@ -21,7 +21,12 @@ extends Interactable
 @export var light_prompt: String = "Set the cap to the ash"
 @export var burning_prompt: String = "It is burning"
 @export_range(0.0, 12.0, 0.1) var light_energy: float = 3.4
-@export_range(0.5, 24.0, 0.5) var light_range: float = 11.0
+## How far the fire reaches. Short, and deliberately shorter than the vault:
+## nothing down here casts a shadow - not the shell, not the carried cap, not
+## this - so a light with the run of the place shines through the masonry and
+## lights every chamber at once. Range is the only wall the lighting has, and
+## the puzzle is finding three braziers in the dark.
+@export_range(0.5, 24.0, 0.5) var light_range: float = 5.0
 ## How much the flame breathes, and how fast. Faster and shallower than a
 ## glow-cap: one is a fire, the other is a mushroom.
 @export_range(0.0, 0.6, 0.01) var pulse_depth: float = 0.18

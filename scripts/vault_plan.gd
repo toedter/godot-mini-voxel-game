@@ -46,10 +46,13 @@ const RELIC_HI := Vector3i(110, HEAD, 85)
 const INNER_LO := Vector3i(40, 0, 5)
 const INNER_HI := Vector3i(83, HEAD, 40)
 
-## The cistern's floor is deep enough to sink a basin into without cutting
-## through it.
-const CISTERN_CAP := 5
+## The basin sunk into the cistern floor. The floor is not thickened for it -
+## that would carry five voxels of stone under the whole chamber to serve one
+## corner of it - so an apron is laid under the basin instead, a voxel proud of
+## it on every side.
 const BASIN_DEPTH := 3
+const BASIN_LO := Vector3i(22, -BASIN_DEPTH, 58)
+const BASIN_HI := Vector3i(43, -1, 79)
 
 ## Where the player is put down when they come in: inside the antechamber,
 ## clear of the doorway, facing down the vault.
@@ -64,6 +67,13 @@ var braziers: Array[Vector3] = []
 var cap_rest := Vector3.ZERO
 
 
+## Clear size (m) of a doorway. The gate that fills one is built from this
+## rather than from a default of its own: the plan cuts the hole, so the plan
+## is what knows how big it is.
+func door_clear() -> Vector2:
+	return Vector2(float(DOOR_HALF * 2 + 1), float(DOOR_TOP + 1)) * VS
+
+
 ## Builds the whole vault and fills in the anchors. One pass, on the main
 ## thread, so it is written to touch each voxel once where it can.
 func build() -> VoxelRoom:
@@ -71,7 +81,7 @@ func build() -> VoxelRoom:
 	var stone := VoxelDefs.SANDSTONE
 	room.chamber(GALLERY_LO, GALLERY_HI, WALL, CAP, stone)
 	room.chamber(ANTE_LO, ANTE_HI, WALL, CAP, stone)
-	room.chamber(CISTERN_LO, CISTERN_HI, WALL, CISTERN_CAP, stone)
+	room.chamber(CISTERN_LO, CISTERN_HI, WALL, CAP, stone)
 	room.chamber(RELIC_LO, RELIC_HI, WALL, CAP, stone)
 	room.chamber(INNER_LO, INNER_HI, WALL, CAP, stone)
 	_cut_doors(room)
@@ -98,7 +108,7 @@ func _cut_doors(room: VoxelRoom) -> void:
 	# slab rather than an opening and has to cover it completely: behind this
 	# one there is no next room, only the dark the vault is buried in.
 	room.carve(Vector3i(mx - 5, 0, ANTE_HI.z + 1),
-		Vector3i(mx + 5, DOOR_TOP - 1, ANTE_HI.z + WALL + 1))
+		Vector3i(mx + 5, DOOR_TOP - 1, ANTE_HI.z + WALL))
 
 
 ## An opening through the masonry between two air volumes that face each other
@@ -126,9 +136,10 @@ func _furnish(room: VoxelRoom) -> void:
 	room.fill(Vector3i(58, 0, 100), Vector3i(66, 7, 108), stone)
 	room.fill(Vector3i(41, 0, 96), Vector3i(46, 4, 120), sandstone)
 
-	# Cistern: a basin sunk into the floor, and the rubble of whatever fell in
-	# and was never fished out.
-	room.carve(Vector3i(22, -BASIN_DEPTH, 58), Vector3i(43, -1, 79))
+	# Cistern: a basin sunk into the floor on its own apron of stone, and the
+	# rubble of whatever fell in and was never fished out.
+	room.fill(BASIN_LO + Vector3i(-1, -2, -1), BASIN_HI + Vector3i(1, 0, 1), sandstone)
+	room.carve(BASIN_LO, BASIN_HI)
 	room.fill(Vector3i(17, 0, 81), Vector3i(24, 3, 85), stone)
 	room.fill(Vector3i(19, 0, 78), Vector3i(22, 1, 80), stone)
 
@@ -153,7 +164,11 @@ func _furnish(room: VoxelRoom) -> void:
 ## The anchors, in metres. Everything that is not masonry is placed off these,
 ## so moving a room moves what stands in it.
 func _anchors() -> void:
-	var mx := float((GALLERY_LO.x + GALLERY_HI.x) / 2) * VS
+	# The centre of the openings, not of the gallery: a doorway cut at DOOR_HALF
+	# either side of voxel n is 2*DOOR_HALF+1 voxels wide, so its middle is half
+	# a voxel further on. Five centimetres, and the width of the slit left down
+	# one side of every door hung on the wrong one.
+	var mx := (float(GALLERY_LO.x + GALLERY_HI.x) + 1.0) * 0.5 * VS
 	# A pace inside the antechamber's door, looking down the vault. The floor
 	# is the top of the air volume's bottom, which is y = 0, and a fingernail
 	# of clearance keeps the capsule off it.
@@ -161,8 +176,12 @@ func _anchors() -> void:
 	exit_door = Vector3(mx, 0.0, float(ANTE_HI.z + 1) * VS)
 	gate = Vector3(mx, 0.0, float(GALLERY_LO.z - 2) * VS)
 	cap_rest = Vector3(float(62) * VS, float(8) * VS, float(104) * VS)
+	# Each one deep in its own chamber, for two reasons. A brazier near a shared
+	# wall shines through it - nothing down here casts a shadow - and a brazier
+	# near a doorway is something to catch on in the dark, which at the far side
+	# of a gate the player has just earned is the worst possible place for it.
 	braziers = [
-		Vector3(float(46) * VS, 0.0, float(54) * VS),
-		Vector3(float(86) * VS, 0.0, float(56) * VS),
-		Vector3(mx, 0.0, float(33) * VS),
+		Vector3(float(19) * VS, 0.0, float(54) * VS),
+		Vector3(float(104) * VS, 0.0, float(54) * VS),
+		Vector3(float(47) * VS, 0.0, float(24) * VS),
 	]

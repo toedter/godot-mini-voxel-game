@@ -80,11 +80,14 @@ func _build(arch: Dictionary) -> void:
 	var vs := VoxelDefs.VOXEL_SIZE
 	var ax := float(arch["x"]) * vs
 	var az := float(arch["z"]) * vs
-	# Straight down from the archway, so the streamed chunks do not change.
-	global_position = Vector3(ax, -depth, az)
 
 	_plan = VaultPlan.new()
 	var rooms := _plan.build()
+	# Hung so that where the player arrives is straight down from the archway,
+	# rather than where the plan happens to have its origin. The vault is now
+	# thirteen metres long - two chunks - so the difference decides whether
+	# going inside quietly re-streams the island overhead.
+	global_position = Vector3(ax - _plan.entry.x, -depth, az - _plan.entry.z)
 	var out: Dictionary = rooms.build()
 	var body := StaticBody3D.new()
 	body.name = "Shell"
@@ -139,6 +142,8 @@ func _build_doors(ax: float, az: float) -> void:
 func _build_props() -> void:
 	_gate = StoneGate.new()
 	_gate.name = "VaultGate"
+	# The plan cut the hole, so the plan is what says how big the slab is.
+	_gate.opening = _plan.door_clear()
 	_gate.position = _plan.gate
 	add_child(_gate)
 

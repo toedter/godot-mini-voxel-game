@@ -616,6 +616,14 @@ func _update_lights(delta: float) -> void:
 ## The disc is only reconsidered when the player crosses a chunk boundary, so
 ## walking a few metres costs nothing.
 func _update_center(force: bool) -> void:
+	# Indoors the player is three hundred metres under the island and can see
+	# none of it. Their XZ still moves - an interior is a room standing at the
+	# same coordinates, not a separate world - and following it would re-stream
+	# a disc of terrain nobody is looking at, twice: once on the way in and once
+	# on the way out. `leave` puts them back exactly where they left from, so
+	# the centre they had then is still the right one.
+	if indoors and not force:
+		return
 	var p := _eye_xz()
 	var m := VoxelDefs.CHUNK_METERS
 	var c := Vector2i(int(floor(p.x / m)), int(floor(p.y / m)))
