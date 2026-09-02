@@ -13,14 +13,19 @@ extends Interactable
 ## Drawn as a dark opening rather than a solid slab, so it reads as somewhere
 ## to walk into.
 @export var frame_material: int = VoxelDefs.STONE
+## A sealed door will not open until something releases it. The way out of the
+## vault is sealed on the way in, which is what makes the room a puzzle rather
+## than a corridor; the doors that lead in are never sealed.
+@export var sealed: bool = false
+@export var seal_prompt: String = "The way out is sealed"
 
 var _interior: Interior
 
 
 func _ready() -> void:
-	prompt = "Climb back out" if leads_out else "Go inside"
-	super()
+	prompt = seal_prompt if sealed else ("Climb back out" if leads_out else "Go inside")
 	label_height = 1.4
+	super()
 	# A door built in code is bound before it is added to the tree, since
 	# get_path_to needs both ends already in it. Only a door placed in a scene
 	# has a path to resolve.
@@ -32,6 +37,23 @@ func _ready() -> void:
 ## Points the door at its interior directly. Call before add_child.
 func bind(interior: Interior) -> void:
 	_interior = interior
+
+
+## Shuts the way out until something opens it, and releases it again. Same
+## shape as the tide lock's seizure: the prompt says why nothing happened, so
+## the player is told there is a puzzle rather than left pressing at a door.
+func seal() -> void:
+	sealed = true
+	prompt = seal_prompt
+	refresh_prompt()
+
+
+func unseal() -> void:
+	if not sealed:
+		return
+	sealed = false
+	prompt = "Climb back out" if leads_out else "Go inside"
+	refresh_prompt()
 
 
 func _build_body() -> void:
@@ -72,7 +94,7 @@ func _build_body() -> void:
 
 
 func _on_use(actor: Node3D) -> void:
-	if _interior == null:
+	if sealed or _interior == null:
 		return
 	var aim := actor as Interactor
 	var body := null if aim == null else aim.body()

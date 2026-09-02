@@ -47,11 +47,34 @@ func carve(a: Vector3i, b: Vector3i) -> void:
 				_v.erase(Vector3i(x, y, z))
 
 
-## A hollow box: walls, floor and ceiling of `thickness`, air inside.
-func room(lo: Vector3i, hi: Vector3i, thickness: int, mat: int) -> void:
-	fill(lo, hi, mat)
-	var t := Vector3i(thickness, thickness, thickness)
-	carve(lo + t, hi - t)
+## A hollow chamber: the air volume you give it, wrapped in walls, a floor and
+## a ceiling.
+##
+## Takes the air rather than the outside of the masonry, because a floor plan
+## is drawn in walkable rectangles, and because filling a solid block and
+## carving it hollow again costs the whole volume: a chamber 4 m square is a
+## hundred thousand dictionary writes to leave twenty thousand voxels standing.
+## Six slabs cost only the masonry.
+func chamber(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
+		mat: int) -> void:
+	var lo := Vector3i(mini(air_lo.x, air_hi.x), mini(air_lo.y, air_hi.y),
+		mini(air_lo.z, air_hi.z))
+	var hi := Vector3i(maxi(air_lo.x, air_hi.x), maxi(air_lo.y, air_hi.y),
+		maxi(air_lo.z, air_hi.z))
+	# Floor and ceiling run the whole footprint, so the corners come from them
+	# and the four walls only have to reach between.
+	fill(Vector3i(lo.x - wall, lo.y - cap, lo.z - wall),
+		Vector3i(hi.x + wall, lo.y - 1, hi.z + wall), mat)
+	fill(Vector3i(lo.x - wall, hi.y + 1, lo.z - wall),
+		Vector3i(hi.x + wall, hi.y + cap, hi.z + wall), mat)
+	fill(Vector3i(lo.x - wall, lo.y, lo.z - wall),
+		Vector3i(lo.x - 1, hi.y, hi.z + wall), mat)
+	fill(Vector3i(hi.x + 1, lo.y, lo.z - wall),
+		Vector3i(hi.x + wall, hi.y, hi.z + wall), mat)
+	fill(Vector3i(lo.x, lo.y, lo.z - wall),
+		Vector3i(hi.x, hi.y, lo.z - 1), mat)
+	fill(Vector3i(lo.x, lo.y, hi.z + 1),
+		Vector3i(hi.x, hi.y, hi.z + wall), mat)
 
 
 ## Deterministic per-voxel brightness, so a flat wall still reads as individual
@@ -78,10 +101,18 @@ func build() -> Dictionary:
 	]
 	for p in _v:
 		var mat: int = _v[p]
-		var col := _shade(p, mat)
+		# Shaded on the first face that actually gets emitted. Most of a
+		# building is masonry nobody can see - a vault of five rooms is ninety
+		# thousand voxels with maybe a third of them showing - and the tint is
+		# a hash and a handful of dictionary lookups per voxel.
+		var col := Color.BLACK
+		var shaded := false
 		for d in DIRS:
 			if _v.has(p + d):
 				continue
+			if not shaded:
+				col = _shade(p, mat)
+				shaded = true
 			_face(verts, norms, cols, idx, p, d, col)
 	if verts.is_empty():
 		return {"mesh": null, "shape": null, "count": 0}

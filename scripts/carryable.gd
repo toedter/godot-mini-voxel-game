@@ -116,14 +116,38 @@ func _scene_root() -> Node:
 	return get_tree().current_scene if get_tree().current_scene != null else get_tree().root
 
 
-## Drops a position onto the terrain. The heightmap is a pure function, so this
-## works whether or not the chunk under it happens to be streamed in.
+## How far (m) below a drop an interior floor is looked for.
+const INDOOR_SETTLE := 3.0
+
+
+## Drops a position onto whatever is under it.
+##
+## Outdoors that is the heightmap, which is a pure function and so answers
+## whether or not the chunk under it happens to be streamed in. Indoors there
+## is no heightmap - the rooms hang hundreds of metres below it, and asking it
+## would fling a cap set down in the vault up onto the island - so the floor is
+## found the only way an authored room can be asked: by looking for it.
 func _grounded(pos: Vector3) -> Vector3:
 	if _world == null or _world.gen == null:
 		return pos
+	if _world.indoors:
+		return _settled(pos)
 	# Dropped objects settle on the terrain rather than hanging where the hand
 	# released them, so nothing is ever left floating or buried.
 	return Vector3(pos.x, _world.gen.collision_y(pos.x, pos.z), pos.z)
+
+
+## The first solid surface under a point, within arm's reach below it. Nothing
+## there - dropped over a stairwell, or through a gap - leaves the object where
+## it was let go of, which is better than dropping it out of the world.
+func _settled(pos: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return pos
+	var q := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 0.1,
+		pos + Vector3.DOWN * INDOOR_SETTLE, LAYER_WORLD)
+	var hit := space.intersect_ray(q)
+	return pos if hit.is_empty() else (hit["position"] as Vector3)
 
 
 func _physics_process(delta: float) -> void:
