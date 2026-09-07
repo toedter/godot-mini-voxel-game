@@ -682,59 +682,288 @@ func _build_stair(it: Dictionary) -> void:
 					_put(lx, y, lz, mat)
 
 
+# --------------------------------------------------------------------------
+# trees
+# --------------------------------------------------------------------------
+
+## Nothing a tree grows may reach further from its trunk than this, in voxels.
+##
+## `_place_features` scans the feature cell of this chunk plus one either side,
+## and a cell is one chunk wide, so a tree rooted two cells out is at least 65
+## voxels away. Anything reaching that far would be built by the chunk it is
+## rooted in and not by this one, and the crown would be sliced off at the
+## chunk border.
+const TREE_REACH := 58
+
+## The three shapes a tree comes in, and how often each turns up. A broadleaf is
+## the ordinary tree of the meadow; the giant is the one standing over a
+## clearing with a crown wide enough to walk under; the conifer is what fills in
+## the slopes behind them.
+const TREE_GIANT_CHANCE := 0.13
+const TREE_CONIFER_CHANCE := 0.24
+
+
+## Plants one tree.
+##
+## Every kind is a trunk, a set of limbs forking off it, and a crown made of
+## many small clumps of foliage hung on those limbs - never one ellipsoid on a
+## stick. The clumps go into a single `_blob_shell` call, so where they overlap
+## they melt into one surface and where they do not the crown keeps the gaps and
+## the lumpy outline that a canopy actually has.
 func _add_tree(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:
-	var big := rng.randf() < 0.18
-	var trunk_h := rng.randi_range(52, 74) if big else rng.randi_range(28, 46)
-	var trunk_r := 4 if big else rng.randi_range(2, 3)
-	var lean_x := rng.randf_range(-0.06, 0.06)
-	var lean_z := rng.randf_range(-0.06, 0.06)
+	var roll := rng.randf()
+	if roll < TREE_GIANT_CHANCE:
+		_tree_broadleaf(lx, lz, base_y, rng, true)
+	elif roll < TREE_GIANT_CHANCE + TREE_CONIFER_CHANCE:
+		_tree_conifer(lx, lz, base_y, rng)
+	else:
+		_tree_broadleaf(lx, lz, base_y, rng, false)
 
-	# trunk: only the outer ring of the cylinder is stored
-	for y in range(-2, trunk_h):
-		var cxo := int(round(float(y) * lean_x))
-		var czo := int(round(float(y) * lean_z))
-		var taper := trunk_r - int(float(y) / float(trunk_h) * 1.5)
-		# Zero, not one: a trunk that tapers away to a single voxel still has to
-		# be recognised as its own surface by the ring test below.
-		var tr2 := maxi(taper, 0) * maxi(taper, 0)
-		for dz in range(-trunk_r, trunk_r + 1):
-			for dx in range(-trunk_r, trunk_r + 1):
-				var dd := dx * dx + dz * dz
-				if dd > tr2:
+
+## Sideways offset (voxels) of a trunk's axis at height `y`: a steady lean plus
+## a bow that is widest at mid height. Two terms rather than one because a lean
+## on its own is a leaning pole - the bow is what makes the stem read as
+## something that grew towards the light.
+func _trunk_off(y: int, trunk_h: int, lean: Vector2, bow: Vector2) -> Vector2i:
+	var t := clampf(float(y) / float(maxi(trunk_h, 1)), 0.0, 1.0)
+	var o := lean * float(y) + bow * sin(PI * t)
+	return Vector2i(int(round(o.x)), int(round(o.y)))
+
+
+## Where the trunk's axis is at height `y`, in this chunk's grid.
+func _trunk_point(lx: int, lz: int, base_y: int, y: int, trunk_h: int,
+		lean: Vector2, bow: Vector2) -> Vector3i:
+	var o := _trunk_off(y, trunk_h, lean, bow)
+	return Vector3i(lx + o.x, base_y + y, lz + o.y)
+
+
+## The stem: a hollow tapering cylinder that flares out where it meets the
+## ground.
+##
+## Only the outer ring of each level is stored, as the inside of a trunk is
+## never seen - except on the levels where the radius drops below the one under
+## it, which would leave an annular ledge to look down through. Those are filled
+## solid, which is a handful of levels over the whole trunk.
+func _trunk(lx: int, lz: int, base_y: int, trunk_h: int, trunk_r: int,
+		lean: Vector2, bow: Vector2) -> void:
+	# The foot spreads by about half the trunk's own width again, over a stretch
+	# a little taller than it is wide.
+	var flare_r := trunk_r + maxi(trunk_r / 2, 1)
+	var flare_h := trunk_r * 2 + 3
+	var prev := -1
+	for y in range(-4, trunk_h):
+		var r := trunk_r
+		if y < flare_h:
+			var f := 1.0 - float(maxi(y, 0)) / float(flare_h)
+			r += int(round(float(flare_r - trunk_r) * f * f))
+		else:
+			var up := float(y - flare_h) / float(maxi(trunk_h - flare_h, 1))
+			r -= int(up * float(trunk_r) * 0.5)
+		r = maxi(r, 1)
+		# Solid where the trunk narrows, and at the very top, so no level ever
+		# opens a window into the hollow.
+		var solid := r < prev or y <= 0 or y == trunk_h - 1
+		prev = r
+		var r2 := r * r
+		var o := _trunk_off(maxi(y, 0), trunk_h, lean, bow)
+		for dz in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if dx * dx + dz * dz > r2:
 					continue
-				var ring := (dx + 1) * (dx + 1) + dz * dz > tr2 \
-					or (dx - 1) * (dx - 1) + dz * dz > tr2 \
-					or dx * dx + (dz + 1) * (dz + 1) > tr2 \
-					or dx * dx + (dz - 1) * (dz - 1) > tr2 \
-					or y == trunk_h - 1
-				if ring or y < 2:
-					_put(lx + cxo + dx, base_y + y, lz + czo + dz, VoxelDefs.WOOD)
+				var ring := solid \
+					or (dx + 1) * (dx + 1) + dz * dz > r2 \
+					or (dx - 1) * (dx - 1) + dz * dz > r2 \
+					or dx * dx + (dz + 1) * (dz + 1) > r2 \
+					or dx * dx + (dz - 1) * (dz - 1) > r2
+				if ring:
+					_put(lx + o.x + dx, base_y + y, lz + o.y + dz, VoxelDefs.WOOD)
 
-	var top := Vector3i(
-		lx + int(round(float(trunk_h) * lean_x)),
-		base_y + trunk_h,
-		lz + int(round(float(trunk_h) * lean_z)))
 
-	# canopy: a couple of overlapping ellipsoid lobes, meshed as a shell
+## One clump of foliage, as a lobe for `_blob_shell`. Flattened, because a
+## canopy is layered: a clump is wider than it is deep, and a stack of them
+## reads as branches carrying leaves rather than as a heap of spheres.
+func _leaf_clump(c: Vector3i, r: int, mat: int, rng: RandomNumberGenerator) -> Dictionary:
+	return {
+		"c": c,
+		"r": Vector3i(r + rng.randi_range(-1, 2),
+			maxi(int(float(r) * 0.85) + rng.randi_range(-1, 1), 2),
+			r + rng.randi_range(-1, 2)),
+		"m": mat,
+	}
+
+
+## Hangs foliage on a branch: clumps over its outer half, growing towards the
+## tip, with a shaded one slung under the end.
+##
+## One clump on the end of each limb is what makes a voxel tree read as a
+## lollipop, or as a ring of them; a run of clumps along the branch is what
+## turns the same limbs into a crown with a filled middle.
+func _branch_leaves(a: Vector3i, b: Vector3i, clump: int, lobes: Array,
+		rng: RandomNumberGenerator) -> void:
+	var ab := Vector3(b - a)
+	for k in 2:
+		var t := 0.62 + 0.38 * float(k)
+		var p := Vector3i((Vector3(a) + ab * t).round())
+		var r := maxi(int(float(clump) * (0.78 + 0.22 * float(k))), 3)
+		lobes.append(_leaf_clump(p + Vector3i(0, r / 3, 0), r, VoxelDefs.LEAF, rng))
+	# The underside. Leaves in shadow are most of what gives a crown its
+	# volume from below, which is the angle the player is nearly always at.
+	if rng.randf() < 0.7:
+		var r := maxi(clump - 3, 3)
+		lobes.append(_leaf_clump(
+			b + Vector3i(rng.randi_range(-2, 2), -clump / 2 - 1, rng.randi_range(-2, 2)),
+			r, VoxelDefs.LEAF_DARK, rng))
+
+
+## An oak: a flared trunk forking into limbs that curve up and out, each of them
+## forking again and carrying leaves over its whole outer half. `big` is the one
+## that stands over a clearing with a crown to walk under.
+func _tree_broadleaf(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator,
+		big: bool) -> void:
+	var trunk_h := rng.randi_range(52, 74) if big else rng.randi_range(30, 46)
+	var trunk_r := rng.randi_range(4, 5) if big else rng.randi_range(2, 3)
+	var lean := Vector2(rng.randf_range(-0.05, 0.05), rng.randf_range(-0.05, 0.05))
+	var bow := Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)) 		* (2.5 if big else 1.4)
+	_trunk(lx, lz, base_y, trunk_h, trunk_r, lean, bow)
+
+	# Buttress roots. The flare on its own is a fat cylinder; these give the
+	# foot the splay that an old tree standing in a wood has.
+	if big:
+		var ra := rng.randf() * TAU
+		for i in 5:
+			var a := ra + TAU * float(i) / 5.0 + rng.randf_range(-0.3, 0.3)
+			var run := rng.randi_range(7, 12)
+			_limb(Vector3i(lx, base_y + rng.randi_range(4, 7), lz),
+				Vector3i(lx + int(cos(a) * float(run)), base_y - 2,
+					lz + int(sin(a) * float(run))),
+				2.4, 1.2, VoxelDefs.WOOD)
+
+	# The crown's envelope, and how big one clump of leaves in it is. Limb tips
+	# stop a clump short of the envelope, so the leaves end where it does and
+	# the crown stays inside the margin the neighbouring chunks build.
+	var crown := mini(rng.randi_range(38, 46) if big else rng.randi_range(25, 31),
+		TREE_REACH - 4)
+	var clump := rng.randi_range(9, 12) if big else rng.randi_range(7, 9)
+	var reach := float(maxi(crown - clump, 6))
+	var limbs := rng.randi_range(7, 8) if big else rng.randi_range(5, 7)
+	# Height (in trunk voxels) the limb tips aim for. Every limb ends near it,
+	# so the crown closes over the stem instead of trailing off to one side.
+	var apex := float(trunk_h) + reach * rng.randf_range(0.35, 0.6)
+	# Where the crown starts. The giant forks low, so the player walks in under
+	# its branches instead of past a bare pole.
+	var fork := int(float(trunk_h) * (0.36 if big else 0.46))
+
 	var lobes := []
-	var lobe_count := rng.randi_range(2, 3)
-	var rad := rng.randi_range(20, 26) if big else rng.randi_range(12, 18)
-	for i in lobe_count:
-		var off := Vector3i(
-			rng.randi_range(-rad / 2, rad / 2),
-			rng.randi_range(-rad / 3, rad / 2),
-			rng.randi_range(-rad / 2, rad / 2))
-		if i == 0:
-			off = Vector3i(0, rad / 3, 0)
-		var rr := Vector3i(
-			rad + rng.randi_range(-3, 3),
-			int(rad * 0.75) + rng.randi_range(-2, 3),
-			rad + rng.randi_range(-3, 3))
-		lobes.append({"c": top + off, "r": rr})
-		# short branch reaching into the lobe
-		if i > 0:
-			_line(top, top + off, 1, VoxelDefs.WOOD)
-	_blob_shell(lobes, VoxelDefs.LEAF, 0.22)
+	var a0 := rng.randf() * TAU
+	for i in limbs:
+		var t := float(i) / float(maxi(limbs - 1, 1))
+		# Limbs spiral up the stem rather than all leaving it at one height,
+		# which is what a fork looks like from the side.
+		var ang := a0 + TAU * (float(i) + rng.randf_range(-0.3, 0.3)) / float(limbs)
+		var y0 := fork + int(float(trunk_h - fork) * (t * 0.75 + rng.randf_range(0.0, 0.2)))
+		var from := _trunk_point(lx, lz, base_y, mini(y0, trunk_h - 1), trunk_h, lean, bow)
+		var dir := Vector2(cos(ang), sin(ang))
+		# Limbs off the low part of the stem carry furthest out - they are the
+		# wide bottom of the crown - and have the furthest to climb to reach the
+		# apex. Deriving the rise from where the limb started rather than from
+		# its place in the spiral is what keeps the crown from leaning: tie the
+		# two together and every tree ends up low and wide on the side its first
+		# limb left, high and narrow on the far side.
+		var out := reach * (1.0 - 0.3 * t) * rng.randf_range(0.8, 1.05)
+		var up := maxf(apex * rng.randf_range(0.84, 1.0) - float(y0), reach * 0.25)
+		# The elbow sits above the straight line from fork to tip, so a limb
+		# leaves the trunk steeply and flattens out as it goes.
+		var mid := from + Vector3i(int(dir.x * out * 0.42), int(up * 0.62),
+			int(dir.y * out * 0.42))
+		var tip := from + Vector3i(int(dir.x * out), int(up), int(dir.y * out))
+		var thick := 2.4 if big else 1.6
+		_limb(from, mid, thick, thick * 0.6, VoxelDefs.WOOD)
+		_limb(mid, tip, thick * 0.6, 1.0, VoxelDefs.WOOD)
+		_branch_leaves(mid, tip, clump, lobes, rng)
+		# A second fork off the elbow, thrown to one side, filling the wedge
+		# between this limb and the next instead of leaving daylight there.
+		if rng.randf() < 0.75:
+			var sa := ang + rng.randf_range(0.5, 1.2) * (1.0 if rng.randf() < 0.5 else -1.0)
+			var sd := Vector2(cos(sa), sin(sa))
+			var so := out * rng.randf_range(0.45, 0.8)
+			var stip := mid + Vector3i(int(sd.x * so),
+				int(up * rng.randf_range(0.15, 0.55)), int(sd.y * so))
+			_limb(mid, stip, thick * 0.6, 0.9, VoxelDefs.WOOD)
+			_branch_leaves(mid, stip, maxi(clump - 2, 4), lobes, rng)
+
+	# The cap over the middle, where the limbs meet: several clumps rather than
+	# one, so the top of the crown is as uneven as the rest of it.
+	var top := _trunk_point(lx, lz, base_y, trunk_h, trunk_h, lean, bow)
+	var centre := top + Vector3i(0, int(reach * 0.5), 0)
+	lobes.append(_leaf_clump(centre, clump + 1, VoxelDefs.LEAF, rng))
+	for i in rng.randi_range(2, 3):
+		var a := rng.randf() * TAU
+		var d := reach * rng.randf_range(0.2, 0.55)
+		lobes.append(_leaf_clump(
+			centre + Vector3i(int(cos(a) * d), rng.randi_range(-clump, 3),
+				int(sin(a) * d)),
+			maxi(clump - rng.randi_range(0, 2), 3), VoxelDefs.LEAF, rng))
+
+	_blob_shell(lobes, VoxelDefs.LEAF, 0.30)
+
+
+## A conifer: a straight stem carrying whorls of short branches that get shorter
+## towards the top, each tipped with a flat pad of needles. Built from the same
+## clumps as the broadleaf, only laid out in a cone.
+func _tree_conifer(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:
+	var trunk_h := rng.randi_range(62, 94)
+	var trunk_r := rng.randi_range(2, 3)
+	var lean := Vector2(rng.randf_range(-0.02, 0.02), rng.randf_range(-0.02, 0.02))
+	var bow := Vector2(rng.randf_range(-0.6, 0.6), rng.randf_range(-0.6, 0.6))
+	_trunk(lx, lz, base_y, trunk_h, trunk_r, lean, bow)
+
+	var spread := rng.randi_range(15, 23)
+	var whorls := rng.randi_range(7, 10)
+	# The lowest branches sit about a third of the way up: the bare stem under
+	# them is most of what tells a conifer apart from a bush at a distance.
+	var low := 0.28 + rng.randf() * 0.12
+	var lobes := []
+	for i in whorls:
+		var t := float(i) / float(maxi(whorls - 1, 1))
+		var y := int(float(trunk_h) * lerpf(low, 0.93, t))
+		var c := _trunk_point(lx, lz, base_y, y, trunk_h, lean, bow)
+		# Branch length falls off towards the top; the exponent keeps the taper
+		# slightly concave, which is the profile of a spruce rather than a cone.
+		var rw := maxi(int(float(spread) * pow(1.0 - t, 0.7)), 3)
+		var arms := rng.randi_range(4, 6)
+		var a0 := rng.randf() * TAU
+		for k in arms:
+			var a := a0 + TAU * float(k) / float(arms) + rng.randf_range(-0.25, 0.25)
+			var d := Vector2(cos(a), sin(a))
+			var run := int(float(rw) * rng.randf_range(0.7, 1.0))
+			# Branches droop: the tip ends a voxel or two below where it left
+			# the trunk.
+			var tip := c + Vector3i(int(d.x * float(run)), rng.randi_range(-3, 0),
+				int(d.y * float(run)))
+			_limb(c, tip, 1.4, 0.8, VoxelDefs.WOOD)
+			var cr := maxi(int(float(run) * 0.62), 3)
+			lobes.append({
+				"c": tip,
+				"r": Vector3i(cr, maxi(int(float(cr) * 0.5), 2), cr),
+				"m": VoxelDefs.LEAF if t > 0.45 or rng.randf() < 0.4 \
+					else VoxelDefs.LEAF_DARK,
+			})
+		# A collar round the stem joins one whorl's pads into a continuous skirt
+		# instead of leaving the trunk showing through between them.
+		var collar := maxi(int(float(rw) * 0.55), 3)
+		lobes.append({
+			"c": c + Vector3i(0, 1, 0),
+			"r": Vector3i(collar, maxi(collar / 2, 2), collar),
+			"m": VoxelDefs.LEAF_DARK,
+		})
+	# The spire.
+	var top := _trunk_point(lx, lz, base_y, trunk_h, trunk_h, lean, bow)
+	lobes.append({
+		"c": top + Vector3i(0, 2, 0),
+		"r": Vector3i(4, 6, 4),
+		"m": VoxelDefs.LEAF,
+	})
+	_blob_shell(lobes, VoxelDefs.LEAF, 0.32)
 
 
 func _add_cactus(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator) -> void:
@@ -977,19 +1206,37 @@ func _add_bush(lx: int, lz: int, rng: RandomNumberGenerator) -> void:
 				_put(x, h + k, z, VoxelDefs.BLADE)
 
 
-func _line(a: Vector3i, b: Vector3i, r: int, mat: int) -> void:
+## A tapering branch from `a` to `b`, `r0` voxels thick where it leaves and `r1`
+## where it ends.
+##
+## Spheres swept along the segment rather than cubes: a third of the voxels for
+## the same silhouette, and two limbs meeting at an elbow join without a corner
+## sticking out of the bend.
+func _limb(a: Vector3i, b: Vector3i, r0: float, r1: float, mat: int) -> void:
 	var d := Vector3(b - a)
 	var steps := int(maxf(d.length(), 1.0))
 	for s in range(steps + 1):
-		var p := Vector3(a) + d * (float(s) / float(steps))
-		var pi := Vector3i(round(p.x), round(p.y), round(p.z))
-		for dz in range(-r, r + 1):
-			for dy in range(-r, r + 1):
-				for dx in range(-r, r + 1):
-					_put(pi.x + dx, pi.y + dy, pi.z + dz, mat)
+		var t := float(s) / float(steps)
+		var p := Vector3(a) + d * t
+		var pi := Vector3i(int(round(p.x)), int(round(p.y)), int(round(p.z)))
+		var rr := lerpf(r0, r1, t)
+		var ri := int(ceil(rr))
+		# Half a voxel of slack, so a radius that lands exactly on the grid
+		# still fills its own shell instead of coming out one voxel thin.
+		var r2 := rr * rr + 0.25
+		for dz in range(-ri, ri + 1):
+			for dy in range(-ri, ri + 1):
+				for dx in range(-ri, ri + 1):
+					if float(dx * dx + dy * dy + dz * dz) <= r2:
+						_put(pi.x + dx, pi.y + dy, pi.z + dz, mat)
 
 
 ## Fills the union of ellipsoids and keeps only its surface layer.
+##
+## A lobe may carry its own material under the key `m`; `mat` is what the rest
+## use. Where two lobes overlap the later one wins, and since only the surface
+## survives, a canopy's lit and shaded clumps meet along the outside of the
+## union with no seam between them.
 func _blob_shell(lobes: Array, mat: int, rough: float) -> void:
 	if lobes.is_empty():
 		return
@@ -1024,6 +1271,27 @@ func _blob_shell(lobes: Array, mat: int, rough: float) -> void:
 	var sz := mx.z - mn.z + 1
 	var inside := PackedByteArray()
 	inside.resize(sx * sy * sz)
+	# The X and Z the lobes reach on each level of the box, so the surface pass
+	# below can walk what was written instead of the whole cuboid.
+	#
+	# It earns its keep because a crown assembled from small clumps fills very
+	# little of its own bounding box: a conifer is a cone in a cuboid nine
+	# metres tall, and the level at its tip spans a couple of clumps out of the
+	# full width of a chunk. These are the ranges the fill scanned rather than
+	# what it actually set, which is a superset and so always safe, and they
+	# cost four compares per lobe per level rather than anything per voxel.
+	var zlo := PackedInt32Array()
+	var zhi := PackedInt32Array()
+	var xlo := PackedInt32Array()
+	var xhi := PackedInt32Array()
+	zlo.resize(sy)
+	zhi.resize(sy)
+	xlo.resize(sy)
+	xhi.resize(sy)
+	zlo.fill(sz)
+	zhi.fill(-1)
+	xlo.fill(sx)
+	xhi.fill(-1)
 
 	# `TerrainGen.hash2i` inlined: it is a handful of integer ops, but it was
 	# being reached through a static call once per cell of every lobe's box,
@@ -1035,10 +1303,28 @@ func _blob_shell(lobes: Array, mat: int, rough: float) -> void:
 	for l in lobes:
 		var c: Vector3i = l["c"]
 		var r: Vector3i = l["r"]
-		var irx := 1.0 / float(maxi(r.x, 1))
+		# Stored one above the material, so that zero stays "outside".
+		var lm: int = int(l.get("m", mat)) + 1
+		var rx := float(maxi(r.x, 1))
+		var irx := 1.0 / rx
 		var iry := 1.0 / float(maxi(r.y, 1))
 		var irz := 1.0 / float(maxi(r.z, 1))
+		# Box relative extent of this lobe, which is the same on every level of
+		# it; only which levels it touches varies.
+		var bz0 := maxi(c.z - r.z, mn.z) - mn.z
+		var bz1 := mini(c.z + r.z, mx.z) - mn.z
+		var bx0 := maxi(c.x - r.x, mn.x) - mn.x
+		var bx1 := mini(c.x + r.x, mx.x) - mn.x
 		for y in range(maxi(c.y - r.y, mn.y), mini(c.y + r.y, mx.y) + 1):
+			var iy := y - mn.y
+			if bz0 < zlo[iy]:
+				zlo[iy] = bz0
+			if bz1 > zhi[iy]:
+				zhi[iy] = bz1
+			if bx0 < xlo[iy]:
+				xlo[iy] = bx0
+			if bx1 > xhi[iy]:
+				xhi[iy] = bx1
 			var fy := float(y - c.y) * iry
 			var fy2 := fy * fy
 			for z in range(maxi(c.z - r.z, mn.z), mini(c.z + r.z, mx.z) + 1):
@@ -1049,26 +1335,39 @@ func _blob_shell(lobes: Array, mat: int, rough: float) -> void:
 					continue
 				var hz: int = z * 19349663 ^ SALT7
 				var base := row - mn.x
-				for x in range(maxi(c.x - r.x, mn.x), mini(c.x + r.x, mx.x) + 1):
+				# Only the span of X the test can still pass over. Scanning the
+				# lobe's full width here means walking twice as many cells as
+				# the ellipsoid has, and the fill is the bulk of what a crown
+				# costs. The slack under the root matches the row skip above,
+				# so no voxel the roughness would have kept is dropped.
+				var hw := int(rx * sqrt(1.3 - fyz)) + 1
+				for x in range(maxi(c.x - hw, mn.x), mini(c.x + hw, mx.x) + 1):
 					var fx := float(x - c.x) * irx
 					var d := fyz + fx * fx
 					var hh: int = (x * 31 + y) * 73856093 ^ hz
 					hh = (hh ^ (hh >> 13)) * 1274126177
 					if d < 1.0 + (float(hh & 1023) * INV_1023 - 0.5) * rough:
-						inside[base + x] = 1
+						inside[base + x] = lm
 
 	for y in range(sy):
-		for z in range(sz):
+		var z0: int = zlo[y]
+		var z1: int = zhi[y]
+		if z0 > z1:
+			continue
+		var x0: int = xlo[y]
+		var x1: int = xhi[y]
+		for z in range(z0, z1 + 1):
 			var row := (y * sz + z) * sx
-			for x in range(sx):
-				if inside[row + x] == 0:
+			for x in range(x0, x1 + 1):
+				var here: int = inside[row + x]
+				if here == 0:
 					continue
 				var exposed := x == 0 or x == sx - 1 or y == 0 or y == sy - 1 or z == 0 or z == sz - 1 \
 					or inside[row + x - 1] == 0 or inside[row + x + 1] == 0 \
 					or inside[row + x - sx] == 0 or inside[row + x + sx] == 0 \
 					or inside[row + x - sx * sz] == 0 or inside[row + x + sx * sz] == 0
 				if exposed:
-					_put(mn.x + x, mn.y + y, mn.z + z, mat)
+					_put(mn.x + x, mn.y + y, mn.z + z, here - 1)
 
 
 ## A neighbouring voxel hides this face if a feature voxel occupies it, or if it

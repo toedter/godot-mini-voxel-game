@@ -566,6 +566,34 @@ var structures: StructureSet
 # features
 # --------------------------------------------------------------------------
 
+## How much clear ground (m) a feature leaves around any masonry.
+##
+## A feature is placed by its foot but takes up the room its crown does, so what
+## each kind wants here is the reach of the widest of its sort.
+##
+## For a tree that is the furthest a limb can get from the stem, which is a
+## giant's forked branch at 4.4 m, plus the thickness of the branch itself: past
+## this no wood can end up inside the lock's terrace, which is the part that
+## matters, since the trunk and the limbs are what the player collides with and
+## what the builder would otherwise stamp masonry through the middle of. The
+## outermost leaves of the very largest crown may still overhang the deck by a
+## few tens of centimetres, and are welcome to - foliage is walked through, and
+## a ring of bare ground wide enough to rule it out would read as a clearing
+## someone had felled. Everything else is about as wide as it is tall and wants
+## no more than a step.
+const FEATURE_CLEARANCE := {"tree": 4.7, "mushroom": 2.6}
+const PROP_CLEARANCE := 0.8
+
+
+## A feature rooted at a world voxel column, or nothing when a structure has
+## already claimed the ground there.
+func _rooted(kind: String, wx: int, wz: int, mx: float, mz: float) -> Dictionary:
+	if structures != null and structures.blocks_feature(
+			mx, mz, FEATURE_CLEARANCE.get(kind, PROP_CLEARANCE)):
+		return {}
+	return {"kind": kind, "x": wx, "z": wz}
+
+
 ## Describes the feature (if any) rooted in the given feature cell.
 ## Returns an empty dictionary when the cell is empty.
 func feature_in_cell(cell_x: int, cell_z: int) -> Dictionary:
@@ -591,7 +619,7 @@ func feature_in_cell(cell_x: int, cell_z: int) -> Dictionary:
 		return {}
 	var planted := ground >= beach_top(mx, mz) and not rock
 	if rock:
-		return {"kind": "boulder", "x": wx, "z": wz} if roll < 0.30 else {}
+		return _rooted("boulder", wx, wz, mx, mz) if roll < 0.30 else {}
 
 	# Uses the same dithered decision as the ground material, so a lone patch of
 	# sand inside the grassland grows cacti and a green nook keeps its trees.
@@ -603,21 +631,21 @@ func feature_in_cell(cell_x: int, cell_z: int) -> Dictionary:
 		density *= maxf(1.0 - b * 1.15, 0.08)
 		if roll < density:
 			if planted:
-				return {"kind": "tree", "x": wx, "z": wz}
+				return _rooted("tree", wx, wz, mx, mz)
 			return {}
 		if roll < density + 0.08:
-			return {"kind": "boulder", "x": wx, "z": wz}
+			return _rooted("boulder", wx, wz, mx, mz)
 		# Mushrooms favour the shady, densely wooded spots, so they come up in
 		# small groves rather than being spread evenly over the grassland.
 		if roll < density + 0.08 + 0.035 + forest * 0.10:
 			if planted:
-				return {"kind": "mushroom", "x": wx, "z": wz}
+				return _rooted("mushroom", wx, wz, mx, mz)
 			return {}
 	else:
 		if roll < 0.04 + 0.08 * b:
 			if planted:
-				return {"kind": "cactus", "x": wx, "z": wz}
+				return _rooted("cactus", wx, wz, mx, mz)
 			return {}
 		if roll < 0.04 + 0.08 * b + 0.10:
-			return {"kind": "boulder", "x": wx, "z": wz}
+			return _rooted("boulder", wx, wz, mx, mz)
 	return {}

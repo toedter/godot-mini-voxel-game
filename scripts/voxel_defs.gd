@@ -46,6 +46,12 @@ const SHROOM_GLOW := 12
 const SEABED := 13
 const SNOW := 14
 const ICE := 15
+## The shaded side of a canopy. A crown is built from many small clumps, and the
+## ones hanging under the limbs or tucked in against the trunk are given this
+## instead of LEAF: without it a tree is one flat green and reads as a blob,
+## with it the crown has a lit top and a dark underside from any angle, which is
+## most of what makes a voxel tree look like foliage rather than like a shape.
+const LEAF_DARK := 16
 
 const COLORS := {
 	GRASS: Color(0.310, 0.600, 0.180),
@@ -54,7 +60,8 @@ const COLORS := {
 	SANDSTONE: Color(0.690, 0.590, 0.395),
 	STONE: Color(0.560, 0.560, 0.545),
 	WOOD: Color(0.395, 0.275, 0.175),
-	LEAF: Color(0.235, 0.500, 0.155),
+	LEAF: Color(0.255, 0.545, 0.170),
+	LEAF_DARK: Color(0.140, 0.345, 0.115),
 	CACTUS: Color(0.275, 0.500, 0.235),
 	BLADE: Color(0.360, 0.680, 0.210),
 	SHROOM_STEM: Color(0.780, 0.735, 0.690),
@@ -74,7 +81,8 @@ const TINT := {
 	SANDSTONE: 0.18,
 	STONE: 0.16,
 	WOOD: 0.10,
-	LEAF: 0.13,
+	LEAF: 0.18,
+	LEAF_DARK: 0.16,
 	CACTUS: 0.09,
 	BLADE: 0.22,
 	SHROOM_STEM: 0.11,

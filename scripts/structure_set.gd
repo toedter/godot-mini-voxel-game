@@ -131,6 +131,73 @@ func overlapping(ox: int, oz: int, span: int) -> Array[Dictionary]:
 	return hit
 
 
+## True when a structure has claimed the ground at (mx, mz), counting
+## `clearance` metres of room around its footprint.
+##
+## The terrain generator scatters its trees and boulders from noise alone and
+## knows nothing about the masonry, so without this a tree roots on the lock's
+## terrace: the builder stamps stone through the half of the trunk that is
+## inside the deck and leaves the rest of it standing in the middle of the one
+## place on the island the player has to walk around. A feature is placed by its
+## foot, so the clearance is what the caller reckons that kind can reach - see
+## `TerrainGen.FEATURE_CLEARANCE`.
+##
+## Measured against each kind's own footprint rather than the bounding radius
+## `overlapping` uses - that one is a circle drawn round the longest dimension,
+## and clearing it would leave a bald field around every wall.
+func blocks_feature(mx: float, mz: float, clearance: float) -> bool:
+	var vs := VoxelDefs.VOXEL_SIZE
+	for it in _items:
+		# Half extents of the footprint along X and Z, in metres.
+		var hx := 0.0
+		var hz := 0.0
+		# Where the footprint's centre is, which is the anchor for everything
+		# except a terrace, whose stair pushes it off to one side.
+		var cx := float(it["x"]) * vs
+		var cz := float(it["z"]) * vs
+		match it["kind"]:
+			WALL:
+				var along := float(int(it["length"]) / 2) * vs
+				var across := float(int(it["thickness"]) / 2) * vs
+				hx = along if int(it["axis"]) == 0 else across
+				hz = across if int(it["axis"]) == 0 else along
+			PILLAR:
+				hx = float(it["radius"]) * vs
+				hz = hx
+			ARCH:
+				# The jambs stand outside the clear span, so the built width is
+				# the opening plus a jamb either side.
+				var half_t := int(it["thickness"]) / 2
+				var span := float(int(it["width"]) / 2 + 2 * half_t + 1) * vs
+				var deep := float(half_t) * vs
+				hx = span if int(it["axis"]) == 0 else deep
+				hz = deep if int(it["axis"]) == 0 else span
+			TERRACE:
+				var half := float(it["half"]) * vs
+				# Only as many steps as it takes to reach the ground: `steps`
+				# carries spares for slopes that keep falling away, and a step
+				# already under the terrain builds nothing.
+				var used := (int(it["top"]) - int(it["base"])) / int(it["rise"]) + 1
+				var run := float(maxi(used, 0) * int(it["tread"])) * vs
+				# The stair comes off one side only, so the box is stretched by
+				# the run and its centre slid half a run that way.
+				var shift := run * 0.5 * float(int(it["dir"]))
+				var along := half + run * 0.5
+				if int(it["axis"]) == 0:
+					cx += shift
+					hx = along
+					hz = half
+				else:
+					cz += shift
+					hx = half
+					hz = along
+			_:
+				continue
+		if absf(mx - cx) <= hx + clearance and absf(mz - cz) <= hz + clearance:
+			return true
+	return false
+
+
 ## A straight run of masonry. `axis` 0 runs along X, 1 along Z. The anchor is
 ## the centre of the run.
 func add_wall(gen: TerrainGen, wx: int, wz: int, axis: int, length: int,
