@@ -223,7 +223,7 @@ func _apply_tint(dust: float) -> void:
 # --------------------------------------------------------------------------
 
 ## Ambient light left inside a sealed room. Not zero: pitch black is not
-## atmospheric, it is a black screen. Low enough that a glow-cap is the
+## atmospheric, it is a black screen. Low enough that a torch is the
 ## difference between seeing the room and not.
 const INDOOR_AMBIENT := Color(0.09, 0.10, 0.13)
 const INDOOR_AMBIENT_ENERGY := 0.16

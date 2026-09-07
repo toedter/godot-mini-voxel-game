@@ -11,7 +11,7 @@
 [ext_resource type="Script" path="res://scripts/tide_lock.gd" id="9_lock"]
 [ext_resource type="Script" path="res://scripts/spawn_place.gd" id="10_place"]
 [ext_resource type="Script" path="res://scripts/pedestal.gd" id="11_pedestal"]
-[ext_resource type="Script" path="res://scripts/glow_cap.gd" id="12_cap"]
+[ext_resource type="Script" path="res://scripts/torch.gd" id="12_torch"]
 [ext_resource type="Script" path="res://scripts/interior.gd" id="13_interior"]
 [ext_resource type="Script" path="res://scripts/save_game.gd" id="14_save"]
 
@@ -119,16 +119,16 @@ offset = Vector3(1, 0, -1.1)
 
 [node name="Pedestal" type="StaticBody3D" parent="."]
 script = ExtResource("11_pedestal")
-accepts = &"glow_cap"
+accepts = &"torch"
 
 [node name="Place" type="Node" parent="Pedestal"]
 script = ExtResource("10_place")
 offset = Vector3(-1, 0, -1.1)
 
-[node name="GlowCap" type="StaticBody3D" parent="."]
-script = ExtResource("12_cap")
+[node name="Torch" type="StaticBody3D" parent="."]
+script = ExtResource("12_torch")
 
-[node name="Place" type="Node" parent="GlowCap"]
+[node name="Place" type="Node" parent="Torch"]
 script = ExtResource("10_place")
 offset = Vector3(-4, 0, -0.5)
 

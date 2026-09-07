@@ -24,9 +24,16 @@ extends Node3D
 ## Where a carried object rides, in this node's own space. The desktop wants it
 ## held off to one side and below the eye so it does not cover the view; a hand
 ## wants it more or less where the hand is, so the XR rig overrides this.
-@export var carry_offset: Vector3 = Vector3(0.26, -0.2, -0.5)
+@export var carry_offset: Vector3 = Vector3(-0.8, -0.5, -0.55)
 ## How fast a picked up object slides into that pose, rather than snapping.
 @export_range(1.0, 60.0, 1.0) var carry_lerp: float = 18.0
+## How a carried object leans in that pose, in degrees (pitch, yaw, roll). The
+## desktop view holds it bottom-left and tilted back and inward - toward the
+## centre of the screen - the classic first-person held-item pose, which is
+## what keeps a torch's flame up in view instead of hidden below the crosshair.
+## A hand in XR already supplies its own orientation, so the XR rig zeroes
+## this out.
+@export var carry_rotation_degrees: Vector3 = Vector3(-15.0, 0.0, -20.0)
 
 ## Fires when the ray moves onto a different Interactable (or onto nothing).
 signal focus_changed(target: Interactable)
@@ -75,6 +82,12 @@ func focus() -> Interactable:
 ## What the player is holding, or null.
 func carried() -> Node3D:
 	return _carried
+
+
+## The orientation a carried object eases into, built fresh from the degrees
+## above rather than cached, since it is only read once a second at most.
+func carry_rotation() -> Quaternion:
+	return Quaternion.from_euler(carry_rotation_degrees * (PI / 180.0))
 
 
 ## Takes an object into the hand. The object reparents itself here so that it

@@ -125,7 +125,7 @@ const INDOOR_SETTLE := 3.0
 ## Outdoors that is the heightmap, which is a pure function and so answers
 ## whether or not the chunk under it happens to be streamed in. Indoors there
 ## is no heightmap - the rooms hang hundreds of metres below it, and asking it
-## would fling a cap set down in the vault up onto the island - so the floor is
+## would fling a torch set down in the vault up onto the island - so the floor is
 ## found the only way an authored room can be asked: by looking for it.
 func _grounded(pos: Vector3) -> Vector3:
 	if _world == null or _world.gen == null:
@@ -157,7 +157,7 @@ func _physics_process(delta: float) -> void:
 	# reads as a thing being carried instead of a decal on the camera.
 	var k: float = clampf(_holder.carry_lerp * delta, 0.0, 1.0)
 	position = position.lerp(_holder.carry_offset, k)
-	quaternion = quaternion.slerp(Quaternion.IDENTITY, k)
+	quaternion = quaternion.slerp(_holder.carry_rotation(), k)
 
 
 # --------------------------------------------------------------------------

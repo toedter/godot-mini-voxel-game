@@ -1,7 +1,7 @@
 class_name Brazier
 extends Interactable
 
-## A stone bowl of cold ash. Hold a cut glow-cap against it and it catches.
+## A stone bowl of cold ash. Hold a burning torch against it and it catches.
 ##
 ## The vault's puzzle is made of these, and they are deliberately made of the
 ## verbs the game already has rather than of a new mechanism: the player is
@@ -9,26 +9,26 @@ extends Interactable
 ## holding another thing is what the sockets outside already ask for. Nothing
 ## here needs a gesture, so it plays the same at a desk and in a headset.
 ##
-## A brazier keeps the cap. Lighting one costs nothing but the walk, which is
+## A brazier keeps the torch. Lighting one costs nothing but the walk, which is
 ## the point - the puzzle is finding the three of them in the dark, not
 ## rationing anything.
 
 ## What has to be in hand for the ash to catch. Empty lights from anything.
-@export var accepts: StringName = &"glow_cap"
+@export var accepts: StringName = &"torch"
 ## The three states of the prompt: nothing in hand, the right thing in hand,
 ## and already burning.
 @export var cold_prompt: String = "Cold ash, long dead"
-@export var light_prompt: String = "Set the cap to the ash"
+@export var light_prompt: String = "Touch the torch to the ash"
 @export var burning_prompt: String = "It is burning"
 @export_range(0.0, 12.0, 0.1) var light_energy: float = 3.4
 ## How far the fire reaches. Short, and deliberately shorter than the vault:
-## nothing down here casts a shadow - not the shell, not the carried cap, not
+## nothing down here casts a shadow - not the shell, not the carried torch, not
 ## this - so a light with the run of the place shines through the masonry and
 ## lights every chamber at once. Range is the only wall the lighting has, and
 ## the puzzle is finding three braziers in the dark.
 @export_range(0.5, 24.0, 0.5) var light_range: float = 5.0
-## How much the flame breathes, and how fast. Faster and shallower than a
-## glow-cap: one is a fire, the other is a mushroom.
+## How much the flame breathes, and how fast. Slower and steadier than the
+## carried torch: this is a bed of ash settled in stone, not fire in hand.
 @export_range(0.0, 0.6, 0.01) var pulse_depth: float = 0.18
 @export_range(0.1, 8.0, 0.1) var pulse_speed: float = 3.7
 
@@ -62,7 +62,7 @@ func is_burning() -> bool:
 
 
 ## Lights it. Public, and told whether a hand did it, because a restored save
-## has to bring one back up with nobody standing in front of it holding a cap.
+## has to bring one back up with nobody standing in front of it holding a torch.
 func kindle(by_hand: bool = true) -> void:
 	if burning:
 		return
@@ -118,7 +118,7 @@ func _build_body() -> void:
 	_light = OmniLight3D.new()
 	_light.light_color = Color(1.0, 0.72, 0.36)
 	_light.omni_range = light_range
-	# Same trade the carried cap makes: a shadow casting light in a room full
+	# Same trade the carried torch makes: a shadow casting light in a room full
 	# of masonry is a second render of the whole vault, twice over in XR.
 	_light.shadow_enabled = false
 	_light.position = Vector3(0.0, 1.0, 0.0)

@@ -12,7 +12,7 @@ extends Node
 ## Anything with state to keep joins the "savable" group and answers
 ## `save_state()` and `load_state()`. State is keyed by node *name*, not by
 ## path: a carryable is reparented onto whatever holds it, so its path is
-## "Main/GlowCap" on the ground and "Main/Pedestal/.../GlowCap" once seated,
+## "Main/Torch" on the ground and "Main/Pedestal/.../Torch" once seated,
 ## and a save keyed by path would never find it again. Savable nodes therefore
 ## need names unique among themselves. It may also answer `save_priority()`:
 ## restores run in ascending order, because some state only makes sense once

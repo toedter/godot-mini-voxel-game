@@ -9,7 +9,7 @@ extends Node3D
 ## and going inside is a move rather than a load.
 ##
 ## It is additive on purpose. Swapping scenes would throw away the tide, the
-## carried glow-cap and every chunk currently streamed, and charge for all of
+## carried torch and every chunk currently streamed, and charge for all of
 ## it again on the way out. Instead Main stays exactly as it is and the player
 ## is moved, with `VoxelWorld.indoors` suspending the outdoor rules that would
 ## otherwise drag them back to the surface.
@@ -114,7 +114,7 @@ func _build(arch: Dictionary) -> void:
 
 func _build_doors(ax: float, az: float) -> void:
 	# Sealed from the moment it is built. The player is not shut in by this -
-	# the cap that opens it is on a plinth a couple of paces away - but the
+	# the torch that opens it is on a plinth a couple of paces away - but the
 	# vault has to say, the moment they arrive, that it wants something.
 	_inside_door = VaultDoor.new()
 	_inside_door.name = "InsideDoor"
@@ -155,15 +155,15 @@ func _build_props() -> void:
 		add_child(b)
 		_braziers.append(b)
 
-	# A cut cap, left burning on the plinth by whoever sealed the place. It is
+	# A torch, left burning on the plinth by whoever sealed the place. It is
 	# the puzzle's only tool, and it is inside the puzzle: a player who climbs
 	# down with empty hands has to be able to finish.
-	var cap := GlowCap.new()
-	cap.name = "VaultCap"
+	var torch := Torch.new()
+	torch.name = "VaultTorch"
 	# Before it enters the tree: Carryable notes where it was put down as it is
-	# readied, and a cap added at the origin would remember the origin.
-	cap.position = _plan.cap_rest
-	add_child(cap)
+	# readied, and a torch added at the origin would remember the origin.
+	torch.position = _plan.torch_rest
+	add_child(torch)
 
 
 ## The one rule of the vault. Two braziers raise the gate that stands between

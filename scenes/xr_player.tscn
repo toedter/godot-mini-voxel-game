@@ -58,6 +58,7 @@ step_angle = 0.5235988
 [node name="Interactor" type="Node3D" parent="XROrigin3D/RightHand"]
 script = ExtResource("7_interactor")
 carry_offset = Vector3(0, -0.02, -0.09)
+carry_rotation_degrees = Vector3(0, 0, 0)
 
 [node name="Jump" type="Node3D" parent="XROrigin3D/RightHand"]
 script = ExtResource("8_jump")

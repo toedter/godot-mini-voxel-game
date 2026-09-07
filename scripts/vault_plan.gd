@@ -63,8 +63,8 @@ var gate := Vector3.ZERO
 ## Cistern, reliquary, inner vault - the order the puzzle expects to be lit in
 ## is not this one; any two of the first two open the gate.
 var braziers: Array[Vector3] = []
-## The plinth in the antechamber, where a cut cap has been left burning.
-var cap_rest := Vector3.ZERO
+## The plinth in the antechamber, where a torch has been left burning.
+var torch_rest := Vector3.ZERO
 
 
 ## Clear size (m) of a doorway. The gate that fills one is built from this
@@ -130,7 +130,7 @@ func _furnish(room: VoxelRoom) -> void:
 	var stone := VoxelDefs.STONE
 	var sandstone := VoxelDefs.SANDSTONE
 
-	# Antechamber: a low plinth with the cut cap on it, and a bench along the
+	# Antechamber: a low plinth with the torch on it, and a bench along the
 	# wall. The plinth is the first thing lit when the player comes in, so it
 	# stands square in front of the door.
 	room.fill(Vector3i(58, 0, 100), Vector3i(66, 7, 108), stone)
@@ -175,7 +175,7 @@ func _anchors() -> void:
 	entry = Vector3(mx, 0.05, float(ANTE_HI.z - 8) * VS)
 	exit_door = Vector3(mx, 0.0, float(ANTE_HI.z + 1) * VS)
 	gate = Vector3(mx, 0.0, float(GALLERY_LO.z - 2) * VS)
-	cap_rest = Vector3(float(62) * VS, float(8) * VS, float(104) * VS)
+	torch_rest = Vector3(float(62) * VS, float(8) * VS, float(104) * VS)
 	# Each one deep in its own chamber, for two reasons. A brazier near a shared
 	# wall shines through it - nothing down here casts a shadow - and a brazier
 	# near a doorway is something to catch on in the dark, which at the far side

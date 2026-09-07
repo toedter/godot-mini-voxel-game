@@ -326,7 +326,7 @@ func _build_drowned_ruin(gen: TerrainGen, cx: int, cz: int) -> void:
 
 
 ## Dry ground beside the ruin: where the terrace goes, and with it the player's
-## start and the frame the lock, the socket and the cap are laid out in.
+## start and the frame the lock, the socket and the torch are laid out in.
 ## Vector2.INF when there is no ruin or nowhere around it to stand, and the
 ## caller falls back to its own spawn search.
 ##

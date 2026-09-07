@@ -25,7 +25,7 @@ extends Interactable
 @export var locked: bool = false
 @export var locked_prompt: String = "The lock is seized"
 ## A pedestal that has to be filled before this lock will turn. Emptying it
-## seizes the lock again, so the glow-cap stays the key rather than becoming a
+## seizes the lock again, so the torch stays the key rather than becoming a
 ## switch that is thrown once and forgotten.
 @export var unlocked_by: NodePath
 
