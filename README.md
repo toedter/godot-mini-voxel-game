@@ -4,12 +4,8 @@ A small first-person exploration game built in [Godot 4.7](https://godotengine.o
 
 ## Screenshots
 
-<!--
-Add a few images here, e.g.:
-![Grassland at sunrise](screenshots/01-island.png)
-![The drowned ruin at low tide](screenshots/02-ruin.png)
-![Inside the vault](screenshots/03-vault.png)
--->
+![The drowned ruin at low tide](screenshots/platform.jpg)
+![Grassland at night](screenshots/night.jpg)
 
 ## Features
 
@@ -40,6 +36,7 @@ Add a few images here, e.g.:
 | `T` | Jump to the ruins (debug) |
 | `Page Up` / `Page Down` | Nudge the tide by a metre (debug) |
 | `Home` | Reset the tide (debug) |
+| `H` | Toggle the debug info overlay |
 
 ### VR (OpenXR headset)
 

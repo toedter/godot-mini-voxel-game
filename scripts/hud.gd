@@ -19,6 +19,10 @@ var _world: VoxelWorld
 var _player: Node3D
 var _music: AmbientMusic
 var _day: DayNight
+## Hides the stats line and the control hints, on H. The interaction prompt
+## stays up regardless - that is not debug output, it is how the player finds
+## out what is under the crosshair.
+var _debug_visible := true
 
 
 func _ready() -> void:
@@ -28,12 +32,18 @@ func _ready() -> void:
 	_day = get_node_or_null(sun_path) as DayNight
 
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if (event as InputEventKey).keycode == KEY_H:
+			_debug_visible = not _debug_visible
+
+
 func _process(_delta: float) -> void:
 	if _world == null or _player == null:
 		return
 	var p := _player.global_position
 	var hint := "WASD move   Shift sprint   Space jump / swim up   Ctrl dive   Mouse look   Esc release cursor"
-	hint += "   PgUp/PgDn tide   Home reset tide   T go to ruins   F5 save   F9 load"
+	hint += "   PgUp/PgDn tide   Home reset tide   T go to ruins   F5 save   F9 load   H debug info"
 	if _music != null:
 		hint += "   M music: %s" % ("on" if _music.is_music_enabled() else "off")
 	if _day != null:
@@ -45,6 +55,9 @@ func _process(_delta: float) -> void:
 	var prompt := "" if aim == null else aim.focus_prompt()
 	if _crosshair != null:
 		_crosshair.color = AIM_IDLE if prompt.is_empty() else AIM_LIVE
+	if not _debug_visible:
+		_label.text = "" if prompt.is_empty() else "[E] %s" % prompt
+		return
 	if not prompt.is_empty():
 		hint = "[E] %s" % prompt
 	# The tide reads as its offset from the datum the land was shaped around,
