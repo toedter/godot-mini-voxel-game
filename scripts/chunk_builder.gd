@@ -1032,23 +1032,39 @@ func _add_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, fc
 		_add_one_mushroom(mx, mz, my, rng, _gen.rand01(fcx, fcz, 0x9c0b + (i + 1) * 977), scale)
 
 
-## Big fantasy mushroom: a thick, slightly bent stem carrying a dome shaped cap.
-## The cap glows from underneath (radial gills) and from spots on its top.
+## One mushroom: a thick, bent stem carrying a cap in one of several colours.
+## The cap ranges from a flat, wide toadstool to a rounded, almost egg-shaped
+## button. Only the gills under the cap glow, each in its own species colour.
 ## `scale` is 1.0 for the big one in a group and well below that for the rest.
 func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator, phase: float, scale: float) -> void:
+	var sp: Dictionary = VoxelDefs.SHROOM_SPECIES[rng.randi_range(0, VoxelDefs.SHROOM_SPECIES.size() - 1)]
+	var cap_mat: int = sp["cap"]
+	var gill_mat: int = sp["gill"]
+	var gill_col: Color = VoxelDefs.COLORS[gill_mat]
+
 	var stem_h := maxi(int(round(float(rng.randi_range(24, 46)) * scale)), 5)
 	var stem_r := maxi(int(round(float(rng.randi_range(3, 5)) * scale)), 1)
-	var lean_x := rng.randf_range(-0.05, 0.05)
-	var lean_z := rng.randf_range(-0.05, 0.05)
 
-	# stem: hollow ring, flaring out towards the foot
+	# A bent centre line rather than a straight one: a main bow towards one side,
+	# plus a smaller opposing wiggle, so the stalk reads as grown and crooked
+	# instead of planted. The offset at the top is where the cap follows.
+	var bend_len := rng.randf_range(0.10, 0.28) * float(stem_h)
+	var bend_ang := rng.randf() * TAU
+	var bend_x := cos(bend_ang) * bend_len
+	var bend_z := sin(bend_ang) * bend_len
+	var wob_len := rng.randf_range(0.0, 0.08) * float(stem_h)
+	var wob_ang := bend_ang + PI * rng.randf_range(0.6, 1.4)
+	var wob_x := cos(wob_ang) * wob_len
+	var wob_z := sin(wob_ang) * wob_len
+
+	# stem: hollow ring, flaring out towards the foot, following the bent line
 	for y in range(-2, stem_h):
-		var t := float(y) / float(stem_h)
-		var flare := 1.0 + pow(1.0 - t, 3.0) * 0.8
+		var t := clampf(float(y) / float(stem_h), 0.0, 1.0)
+		var flare := 1.0 + pow(1.0 - t, 3.0) * 0.9
 		var r := int(round(float(stem_r) * flare))
 		var r2 := r * r
-		var cxo := int(round(float(y) * lean_x))
-		var czo := int(round(float(y) * lean_z))
+		var offx := int(round(bend_x * t * t + wob_x * sin(t * PI)))
+		var offz := int(round(bend_z * t * t + wob_z * sin(t * PI)))
 		for dz in range(-r, r + 1):
 			for dx in range(-r, r + 1):
 				var dd := dx * dx + dz * dz
@@ -1059,24 +1075,20 @@ func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator
 					or dx * dx + (dz + 1) * (dz + 1) > r2 \
 					or dx * dx + (dz - 1) * (dz - 1) > r2
 				if ring or y < 1:
-					_put(lx + cxo + dx, base_y + y, lz + czo + dz, VoxelDefs.SHROOM_STEM)
+					_put(lx + offx + dx, base_y + y, lz + offz + dz, VoxelDefs.SHROOM_STEM)
 
-	var cx := lx + int(round(float(stem_h) * lean_x))
-	var cz := lz + int(round(float(stem_h) * lean_z))
+	# the cap sits on the top of the bent stem; at the top the wiggle has died
+	# off (sin(PI) == 0), so only the main bow reaches the joint.
+	var cx := lx + int(round(bend_x))
+	var cz := lz + int(round(bend_z))
 	# the cap sinks a little onto the stem so there is no gap at the joint
 	var cap_y := base_y + stem_h - 2
-	var cap_r := maxi(int(round(float(rng.randi_range(11, 20)) * scale)), 4)
-	var cap_h := maxi(int(float(cap_r) * rng.randf_range(0.55, 0.8)), 3)
-	var gills := maxi(int(round(float(rng.randi_range(9, 16)) * sqrt(scale))), 5)
-
-	# glowing spots scattered over the dome
-	var spots: Array[Vector3] = []
-	for i in rng.randi_range(3, 6):
-		var a := rng.randf() * TAU
-		var st := rng.randf_range(0.1, 0.8)
-		var sr := float(cap_r) * sqrt(maxf(1.0 - st * st, 0.0))
-		spots.append(Vector3(cos(a) * sr, st * float(cap_h), sin(a) * sr))
-	var spot_r2 := pow(maxf(float(cap_r) * 0.22, 2.0), 2.0)
+	# a semi-ellipsoid: the height/width ratio runs from a squat, flat toadstool
+	# to a tall, rounded button, so no two caps are the same silhouette.
+	var cap_r := maxi(int(round(float(rng.randf_range(8.0, 24.0)) * scale)), 4)
+	var cap_ratio := rng.randf_range(0.22, 1.05)
+	var cap_h := maxi(int(round(float(cap_r) * cap_ratio)), 3)
+	var gills := maxi(int(round(float(rng.randi_range(10, 18) * sqrt(scale)))), 5)
 
 	for y in range(0, cap_h + 1):
 		var t := float(y) / float(cap_h)
@@ -1094,27 +1106,27 @@ func _add_one_mushroom(lx: int, lz: int, base_y: int, rng: RandomNumberGenerator
 				# only the shell is kept: the outer skin plus the underside
 				if dd < inner2 and y > 0:
 					continue
-				var mat := VoxelDefs.SHROOM_CAP
 				if y == 0:
-					# radial gills, every other wedge lit
+					# the underside: radial gills, every other wedge. Only the gill
+					# voxels go on the glow surface; the skin between them stays
+					# the ordinary, dark cap so nothing above the gills lights up.
 					var ang := atan2(float(dz), float(dx))
 					var wedge := int(floor((ang + PI) / TAU * float(gills) * 2.0))
-					mat = VoxelDefs.SHROOM_GLOW if wedge % 2 == 0 else VoxelDefs.SHROOM_CAP
+					if wedge % 2 == 0:
+						_put_glow(cx + dx, cap_y + y, cz + dz, gill_mat, phase)
+					else:
+						_put(cx + dx, cap_y + y, cz + dz, cap_mat)
 				else:
-					var p := Vector3(float(dx), float(y), float(dz))
-					for s in spots:
-						if p.distance_squared_to(s) < spot_r2:
-							mat = VoxelDefs.SHROOM_GLOW
-							break
-				_put_glow(cx + dx, cap_y + y, cz + dz, mat, phase)
+					_put(cx + dx, cap_y + y, cz + dz, cap_mat)
 
-	_add_mushroom_light(cx, base_y, stem_h, cz, cap_r, phase)
+	_add_mushroom_light(cx, base_y, stem_h, cz, cap_r, phase, gill_col)
 
 
-## A mushroom lights its own patch of ground. Only the chunk the cap sits in
-## records the light, otherwise every neighbour that meshes part of the cap
-## would add one of its own and the spot would be several times too bright.
-func _add_mushroom_light(cx: int, base_y: int, stem_h: int, cz: int, cap_r: int, phase: float) -> void:
+## A mushroom lights its own patch of ground in the colour of its gills. Only
+## the chunk the cap sits in records the light, otherwise every neighbour that
+## meshes part of the cap would add one of its own and the spot would be several
+## times too bright.
+func _add_mushroom_light(cx: int, base_y: int, stem_h: int, cz: int, cap_r: int, phase: float, gill_col: Color) -> void:
 	if not _want_lights:
 		return
 	if cx < 0 or cx >= CS or cz < 0 or cz >= CS:
@@ -1127,6 +1139,7 @@ func _add_mushroom_light(cx: int, base_y: int, stem_h: int, cz: int, cap_r: int,
 		"radius": 6.0 + float(cap_r) * 0.7,
 		"energy": 1.3 + float(cap_r) * 0.14,
 		"phase": phase,
+		"color": gill_col,
 	})
 
 

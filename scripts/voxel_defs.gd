@@ -53,6 +53,34 @@ const ICE := 15
 ## most of what makes a voxel tree look like foliage rather than like a shape.
 const LEAF_DARK := 16
 
+## Mushroom species. Each one is a cap colour paired with the bioluminescent
+## colour of its gills (which is also the colour of the light it throws). The
+## stem is shared and stays pale; what changes from species to species is the
+## cap and the glow underneath it, so a grove reads as several kinds at once.
+const CAP_VIOLET := 17
+const CAP_TEAL := 18
+const CAP_EMERALD := 19
+const CAP_AMBER := 20
+const CAP_AZURE := 21
+const CAP_MAGENTA := 22
+const GILL_VIOLET := 23
+const GILL_TEAL := 24
+const GILL_EMERALD := 25
+const GILL_AMBER := 26
+const GILL_AZURE := 27
+const GILL_MAGENTA := 28
+
+## A mushroom rolls one of these; it carries the cap and the gill material the
+## shape is built from.
+const SHROOM_SPECIES := [
+	{"cap": CAP_VIOLET, "gill": GILL_VIOLET},
+	{"cap": CAP_TEAL, "gill": GILL_TEAL},
+	{"cap": CAP_EMERALD, "gill": GILL_EMERALD},
+	{"cap": CAP_AMBER, "gill": GILL_AMBER},
+	{"cap": CAP_AZURE, "gill": GILL_AZURE},
+	{"cap": CAP_MAGENTA, "gill": GILL_MAGENTA},
+]
+
 const COLORS := {
 	GRASS: Color(0.310, 0.600, 0.180),
 	DIRT: Color(0.400, 0.290, 0.190),
@@ -67,6 +95,18 @@ const COLORS := {
 	SHROOM_STEM: Color(0.780, 0.735, 0.690),
 	SHROOM_CAP: Color(0.360, 0.170, 0.480),
 	SHROOM_GLOW: Color(0.640, 0.380, 0.900),
+	CAP_VIOLET: Color(0.360, 0.170, 0.480),
+	CAP_TEAL: Color(0.085, 0.355, 0.410),
+	CAP_EMERALD: Color(0.130, 0.415, 0.170),
+	CAP_AMBER: Color(0.555, 0.295, 0.090),
+	CAP_AZURE: Color(0.130, 0.245, 0.560),
+	CAP_MAGENTA: Color(0.560, 0.140, 0.335),
+	GILL_VIOLET: Color(0.640, 0.420, 0.950),
+	GILL_TEAL: Color(0.300, 0.860, 0.820),
+	GILL_EMERALD: Color(0.500, 0.950, 0.400),
+	GILL_AMBER: Color(1.000, 0.660, 0.240),
+	GILL_AZURE: Color(0.420, 0.600, 1.000),
+	GILL_MAGENTA: Color(1.000, 0.420, 0.720),
 	SEABED: Color(0.545, 0.520, 0.430),
 	SNOW: Color(0.930, 0.950, 0.980),
 	ICE: Color(0.735, 0.855, 0.925),
@@ -88,17 +128,33 @@ const TINT := {
 	SHROOM_STEM: 0.11,
 	SHROOM_CAP: 0.14,
 	SHROOM_GLOW: 0.08,
+	CAP_VIOLET: 0.14,
+	CAP_TEAL: 0.14,
+	CAP_EMERALD: 0.15,
+	CAP_AMBER: 0.15,
+	CAP_AZURE: 0.14,
+	CAP_MAGENTA: 0.15,
+	GILL_VIOLET: 0.08,
+	GILL_TEAL: 0.08,
+	GILL_EMERALD: 0.08,
+	GILL_AMBER: 0.08,
+	GILL_AZURE: 0.08,
+	GILL_MAGENTA: 0.08,
 	SEABED: 0.20,
 	SNOW: 0.09,
 	ICE: 0.10,
 }
 
 ## Materials drawn with the glow shader, and how brightly each one lights up
-## once it gets dark. The cap only smoulders; the gills and spots carry the
-## actual light.
+## once it gets dark. Only the gills under the cap glow; the cap itself is an
+## ordinary surface that stays dark until the light from the gills reaches it.
 const GLOW := {
-	SHROOM_CAP: 0.18,
-	SHROOM_GLOW: 1.0,
+	GILL_VIOLET: 1.0,
+	GILL_TEAL: 1.0,
+	GILL_EMERALD: 1.0,
+	GILL_AMBER: 1.0,
+	GILL_AZURE: 1.0,
+	GILL_MAGENTA: 1.0,
 }
 
 ## Material shown on the vertical sides underneath the surface voxel.
@@ -116,7 +172,11 @@ const SUBSURFACE := {
 }
 
 ## Materials that the player collides with (leaves and grass are walk-through).
-const SOLID_FEATURES := {WOOD: true, CACTUS: true, STONE: true, SHROOM_STEM: true, SHROOM_CAP: true}
+const SOLID_FEATURES := {
+	WOOD: true, CACTUS: true, STONE: true,
+	SHROOM_STEM: true, SHROOM_CAP: true,
+	CAP_VIOLET: true, CAP_TEAL: true, CAP_EMERALD: true, CAP_AMBER: true, CAP_AZURE: true, CAP_MAGENTA: true,
+}
 
 ## Returns the material colour; the alpha channel carries the per-voxel tint
 ## strength, which the voxel shader reads (the surface itself stays opaque).

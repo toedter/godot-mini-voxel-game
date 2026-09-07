@@ -272,7 +272,6 @@ func set_glow_level(amount: float) -> void:
 func _ensure_materials() -> void:
 	if _material != null:
 		return
-	var lin := glow_color.srgb_to_linear()
 	_material = ShaderMaterial.new()
 	_material.shader = load("res://shaders/voxel.gdshader")
 	_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
@@ -282,7 +281,6 @@ func _ensure_materials() -> void:
 	_glow_material.shader = load("res://shaders/voxel_glow.gdshader")
 	_glow_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
 	_glow_material.set_shader_parameter("tint_scale", voxel_tint)
-	_glow_material.set_shader_parameter("glow_color", Vector3(lin.r, lin.g, lin.b))
 	_glow_material.set_shader_parameter("glow_strength", glow_strength)
 	_glow_material.set_shader_parameter("pulse_speed", glow_pulse_speed)
 	_glow_material.set_shader_parameter("pulse_depth", glow_pulse_depth)
@@ -811,7 +809,9 @@ func _spawn_chunk(key: Vector2i, res: Dictionary) -> Dictionary:
 		# into world space.
 		light.position = origin + spec["pos"]
 		light.omni_range = spec["radius"]
-		light.light_color = glow_color
+		# The light matches the gills that cast it, so each species pools its own
+		# colour on the ground below rather than the grove glowing one hue.
+		light.light_color = spec.get("color", glow_color)
 		# Shadows would cost far more than they add for a soft glow that sits
 		# under a cap and mostly lights the ground right below it.
 		light.shadow_enabled = false
