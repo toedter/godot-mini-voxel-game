@@ -31,15 +31,35 @@ extends RefCounted
 ## water plane needs the real depth, and levels out just under the surface
 ## further out, where the water is opaque anyway.
 ##
+## That last part is the tide's business and not this file's. The mesh carries
+## the sea bed; far_terrain.gdshader is handed the level the water stands at and
+## raises the ocean onto it, so the tide moves the painted sea the same frame it
+## moves the sea plane. What is baked here is only what the tide cannot change:
+## the ground, the woods on it, and which blocks lie deep enough to be folded
+## away. Nothing here is ever rebuilt.
+##
 ## The result is handed back as a list of tiles rather than as one mesh, so that
 ## frustum and shadow culling have something to work with. As one mesh the whole
 ## island would be redrawn into every shadow cascade every frame.
 
 ## Deepest the painted ocean surface may sit below the waterline, and the depth
-## range over which it eases from the sea bed onto that level.
+## over which it eases from the sea bed onto that level. The shader does the
+## easing; these live here because they are bound to COARSE_DEPTH below, and
+## VoxelWorld pushes them across.
+##
+## SHELF_END must not exceed COARSE_DEPTH, and that is not a matter of taste.
+## A folded block is a single quad where its fine neighbours have nine vertices
+## along the same edge, so the two only agree if the shader's lift is constant
+## over that edge. Folding already guarantees at least COARSE_DEPTH of water
+## there, so a lift that has finished easing by then is flat on both sides and
+## the seam closes exactly; one that were still easing would crack it open.
+## SHELF_BEGIN is where the surface starts leaving the bed, and it is set at
+## roughly the water shader's `clarity`: while the bed can still be made out
+## through the water it keeps its own shape and its own shading, and only once
+## the water has gone milky does the mesh become the sea instead of the bottom.
 const SEA_SHELF := 4.0
-const SHELF_BEGIN := 6.0
-const SHELF_END := 14.0
+const SHELF_BEGIN := 2.0
+const SHELF_END := 6.0
 ## Body colour of the far water. Matches water.gdshader so the sea plane around
 ## the player and the painted sea beyond it read as the same water.
 const SHALLOW_COLOR := Color(0.10, 0.44, 0.44)
@@ -79,11 +99,14 @@ const CANOPY_GAIN := 12.0
 const CANOPY_MAX := 7.0
 
 var _gen: TerrainGen
-## World Y the water stood at when this mesh was painted. The land the mesh
-## carries is fixed, but everything it paints as ocean - which blocks may be
-## folded away, how deep each cell reads, where the surface levels out - is
-## measured from the waterline, so the mesh has to be rebuilt when the tide
-## moves. See VoxelWorld._rebuild_far_terrain.
+## Lowest world Y the tide can ever reach, which is what the two decisions the
+## mesh cannot take back are measured from: a block is only folded away when it
+## is deep even at low water, and the drop below the real surface only fades out
+## under ground that is drowned even at low water. Both are then true at every
+## other level the tide can stand at.
+##
+## Where the water happens to be right now is the shader's business - see
+## `sea_y` in far_terrain.gdshader.
 var _sea: float
 var _step: float
 var _drop: float
@@ -110,21 +133,22 @@ var _can := PackedFloat32Array()
 ## on a worker thread.
 ##
 ## `extent` is the half size (m) of the square the mesh covers, `step` the size
-## of one cell of the fine grid and `drop` how far the land is sunk below the
-## real surface.
+## of one cell of the fine grid, `drop` how far the land is sunk below the real
+## surface and `low_water` the bottom of the tide's range - see `_sea`. The
+## level the water actually stands at is not wanted here.
 ##
 ## Returns an array of {pos, mesh, canopy_surface, has_land}: where the tile
 ## goes, what to draw, which of its surfaces is the canopy shell (-1 when it
 ## carries no woods) and whether it holds anything worth casting a shadow.
-static func build(gen: TerrainGen, water_y: float, extent: float, step: float,
+static func build(gen: TerrainGen, low_water: float, extent: float, step: float,
 		drop: float) -> Array:
-	return FarTerrain.new()._run(gen, water_y, extent, step, drop)
+	return FarTerrain.new()._run(gen, low_water, extent, step, drop)
 
 
-func _run(gen: TerrainGen, water_y: float, extent: float, step: float,
+func _run(gen: TerrainGen, low_water: float, extent: float, step: float,
 		drop: float) -> Array:
 	_gen = gen
-	_sea = water_y
+	_sea = low_water
 	_step = step
 	_drop = drop
 	_block_m = step * float(BLOCK)
@@ -281,18 +305,17 @@ func _resolve_fine() -> void:
 						_can[gi] = _crown_height(mx, mz, raw, w)
 
 
-## Height of the coarse surface at one point. The drop fades out below the
-## waterline: down there nothing is ever seen next to a streamed chunk, and it
-## is what lets a folded water block agree with its fine neighbours.
+## Height of the coarse ground at one point: the real surface, sunk by the drop.
+##
+## This is the sea bed as much as it is the land - where the water goes is not
+## decided here. The drop fades out below low water: down there nothing is ever
+## seen next to a streamed chunk, and a point with no drop on it is one a folded
+## block and its fine neighbours can agree on exactly.
 func _point_y(raw: float, grad: float, bow: float) -> float:
-	var y := raw
 	var k := smoothstep(_sea - DROP_BAND, _sea + 1.0, raw)
-	if k > 0.0:
-		y -= k * minf(_drop + DROP_SLOPE * grad + DROP_BOW * bow, DROP_MAX)
-	var depth := _sea - y
-	if depth <= 0.0:
-		return y
-	return _sea - lerpf(depth, SEA_SHELF, smoothstep(SHELF_BEGIN, SHELF_END, depth))
+	if k <= 0.0:
+		return raw
+	return raw - k * minf(_drop + DROP_SLOPE * grad + DROP_BOW * bow, DROP_MAX)
 
 
 ## Where a fine block meets a folded one the folded side is a straight line
@@ -364,15 +387,6 @@ func _crown_height(mx: float, mz: float, ground: float, wood: float) -> float:
 # colour
 # --------------------------------------------------------------------------
 
-## Open water, shaded by how deep it is. Alpha marks the cell as water for the
-## shader sky reflection.
-func _water_color(y: float) -> Color:
-	var depth: float = clampf((_sea - y) / DEPTH_FADE, 0.0, 1.0)
-	var c := SHALLOW_COLOR.lerp(DEEP_COLOR, depth)
-	c.a = 1.0
-	return c
-
-
 ## The ground material the chunk mesher would use at the same spot, pulled
 ## towards the colour of a canopy where the woods are.
 func _land_color(mx: float, mz: float, y: float, gradient: float, wood: float,
@@ -406,6 +420,11 @@ const CANOPY_FLOOR := 2.0
 var _qv := PackedVector3Array()
 var _qnrm := PackedVector3Array()
 var _qcol := PackedColorArray()
+## World Y of the ground under each vertex, handed to the shader through UV.x.
+## For the ground surface that is the vertex's own height, before the shader
+## raises the ocean onto it; for the canopy it is the ground the crowns stand
+## on, several metres below the vertex itself.
+var _quv := PackedVector2Array()
 var _qidx := PackedInt32Array()
 var _qn := 0
 
@@ -474,15 +493,21 @@ func _emit_ground(bx0: int, bz0: int, bx1: int, bz1: int, ox: float, oz: float) 
 			var gx0 := bx * BLOCK
 			var gz0 := bz * BLOCK
 			if _coarse[bz * _nb + bx] != 0:
-				# Open water: the whole block collapses onto a single quad
+				# Deep water: the whole block collapses onto a single quad
 				# spanning its four corners.
 				var c0 := bz * _cs + bx
 				var y00 := _point_y(_craw[c0], 0.0, 0.0)
 				var y10 := _point_y(_craw[c0 + 1], 0.0, 0.0)
 				var y01 := _point_y(_craw[c0 + _cs], 0.0, 0.0)
 				var y11 := _point_y(_craw[c0 + _cs + 1], 0.0, 0.0)
+				# The shader floats the ocean over this, so what is drawn here
+				# is the bed underneath - which no tide ever uncovers, or the
+				# block would not have been folded in the first place.
+				var bmid := (y00 + y10 + y01 + y11) * 0.25
 				_quad(_at(gx0) - ox, _at(gz0) - oz, _block_m, y00, y10, y01, y11,
-					_water_color((y00 + y10 + y01 + y11) * 0.25))
+					_land_color(_at(gx0) + _block_m * 0.5, _at(gz0) + _block_m * 0.5,
+						bmid, 0.0, 0.0, gx0, gz0),
+					y00, y10, y01, y11)
 				continue
 
 			for lz in BLOCK:
@@ -498,16 +523,16 @@ func _emit_ground(bx0: int, bz0: int, bx1: int, bz1: int, ox: float, oz: float) 
 					var cx := gx0 + lx
 					var cz := gz0 + lz
 					var mid := (h00 + h10 + h01 + h11) * 0.25
-					var col: Color
-					if _fraw[i0] < _sea and _fraw[i0 + 1] < _sea \
-							and _fraw[i1] < _sea and _fraw[i1 + 1] < _sea:
-						col = _water_color(mid)
-					else:
-						var grad := maxf(absf(h10 - h00), absf(h01 - h00)) / _step
-						var wood := (_wood[i0] + _wood[i0 + 1] + _wood[i1] + _wood[i1 + 1]) * 0.25
-						col = _land_color(_at(cx) + _step * 0.5, _at(cz) + _step * 0.5,
-							mid, grad, wood, cx, cz)
-					_quad(_at(cx) - ox, _at(cz) - oz, _step, h00, h10, h01, h11, col)
+					# Ground, whether or not the sea happens to be over it. The
+					# shader paints the water on per fragment, so the shoreline
+					# it draws is a curve across the cell rather than the whole
+					# cell flipping from land to sea at once.
+					var grad := maxf(absf(h10 - h00), absf(h01 - h00)) / _step
+					var wood := (_wood[i0] + _wood[i0 + 1] + _wood[i1] + _wood[i1 + 1]) * 0.25
+					var col := _land_color(_at(cx) + _step * 0.5, _at(cz) + _step * 0.5,
+						mid, grad, wood, cx, cz)
+					_quad(_at(cx) - ox, _at(cz) - oz, _step, h00, h10, h01, h11, col,
+						h00, h10, h01, h11)
 
 
 ## The woods, as a shell floating over the ground surface. Sinks back onto the
@@ -535,15 +560,21 @@ func _emit_canopy(bx0: int, bz0: int, bx1: int, bz1: int, ox: float, oz: float) 
 						continue
 					var cx := gx0 + lx
 					var cz := gz0 + lz
+					# The ground handed over is what the crowns stand on, not
+					# the crowns themselves: it is what tells the shader whether
+					# this patch of wood is under the sea at the level the tide
+					# stands at now, and has to be drowned.
 					_quad(_at(cx) - ox, _at(cz) - oz, _step,
 						_fy[i0] + a00, _fy[i0 + 1] + a10, _fy[i1] + a01, _fy[i1 + 1] + a11,
-						_jitter(leaf, cx, cz, 0x51d3, 0.26))
+						_jitter(leaf, cx, cz, 0x51d3, 0.26),
+						_fy[i0], _fy[i0 + 1], _fy[i1], _fy[i1 + 1])
 
 
 func _begin(cells: int) -> void:
 	_qv.resize(cells * 4)
 	_qnrm.resize(cells * 4)
 	_qcol.resize(cells * 4)
+	_quv.resize(cells * 4)
 	_qidx.resize(cells * 6)
 	_qn = 0
 
@@ -561,14 +592,18 @@ func _finish() -> Array:
 	arrays[Mesh.ARRAY_VERTEX] = _qv.slice(0, _qn)
 	arrays[Mesh.ARRAY_NORMAL] = _qnrm.slice(0, _qn)
 	arrays[Mesh.ARRAY_COLOR] = _qcol.slice(0, _qn)
+	arrays[Mesh.ARRAY_TEX_UV] = _quv.slice(0, _qn)
 	arrays[Mesh.ARRAY_INDEX] = _qidx.slice(0, _qn / 4 * 6)
 	return arrays
 
 
 ## One flat shaded quad. Same corner order as the top faces of the chunk
 ## mesher, so both read the same way under the same light.
+##
+## `g00`..`g11` are the ground under each corner; see `_quv`.
 func _quad(x0: float, z0: float, size: float,
-		h00: float, h10: float, h01: float, h11: float, col: Color) -> void:
+		h00: float, h10: float, h01: float, h11: float, col: Color,
+		g00: float, g10: float, g01: float, g11: float) -> void:
 	var x1 := x0 + size
 	var z1 := z0 + size
 	var a := Vector3(x0, h00, z0)
@@ -584,6 +619,11 @@ func _quad(x0: float, z0: float, size: float,
 	_qv[v + 1] = b
 	_qv[v + 2] = c
 	_qv[v + 3] = d
+	# Same winding as the vertices above: 00, 01, 11, 10.
+	_quv[v] = Vector2(g00, 0.0)
+	_quv[v + 1] = Vector2(g01, 0.0)
+	_quv[v + 2] = Vector2(g11, 0.0)
+	_quv[v + 3] = Vector2(g10, 0.0)
 	for k in 4:
 		_qnrm[v + k] = nrm
 		_qcol[v + k] = col

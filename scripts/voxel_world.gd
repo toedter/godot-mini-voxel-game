@@ -17,7 +17,9 @@ extends Node3D
 
 signal world_ready
 ## Fires once the tide has settled at a new level, after the distant island has
-## been repainted for it. The hook a game hangs "the water reached the mark" on.
+## reached the level it was sent to. The hook a game hangs "the water reached
+## the mark" on. Nothing has to be repainted for it: the sea plane and the
+## painted ocean out past the mist both follow the level every frame.
 signal tide_changed(water_y: float)
 
 @export var world_seed: int = 1337
@@ -164,11 +166,6 @@ var _far: Node3D
 var _far_job: int = -1
 var _far_tiles: Array = []
 var _far_built := false
-## Water level the in flight far terrain job is painting for, and whether the
-## tide has moved on since it was dispatched. The job samples the level once at
-## dispatch rather than reading `water_level` off the main thread while it runs.
-var _far_job_water: float = VoxelDefs.SEA_DATUM
-var _far_dirty := false
 ## All keyed by Vector2i(chunk x, chunk z).
 ##
 ## A chunk is not a node. Its mesh is a bare RenderingServer instance, which is
@@ -302,9 +299,17 @@ func _ensure_materials() -> void:
 	_far_material = ShaderMaterial.new()
 	_far_material.shader = far_shader
 	_far_material.set_shader_parameter("voxel_size", VoxelDefs.VOXEL_SIZE)
+	_far_material.set_shader_parameter("sea_shelf", FarTerrain.SEA_SHELF)
+	_far_material.set_shader_parameter("shelf_begin", FarTerrain.SHELF_BEGIN)
+	_far_material.set_shader_parameter("shelf_end", FarTerrain.SHELF_END)
+	_far_material.set_shader_parameter("shallow_color", FarTerrain.SHALLOW_COLOR)
+	_far_material.set_shader_parameter("deep_color", FarTerrain.DEEP_COLOR)
+	_far_material.set_shader_parameter("depth_fade", FarTerrain.DEPTH_FADE)
 	_far_canopy_material = ShaderMaterial.new()
 	_far_canopy_material.shader = far_shader
+	_far_canopy_material.set_shader_parameter("is_canopy", true)
 	_push_canopy_band()
+	_push_far_sea()
 
 
 ## The distant island wears a shell of canopy over its woods, which stands in
@@ -321,17 +326,18 @@ func _push_canopy_band() -> void:
 ## The distant island is static, so it is built once on a worker thread and
 ## then left alone. Until it arrives the world simply ends in the haze, exactly
 ## as it did before.
+##
+## Once meant "until the tide moves": the painted ocean used to be baked into
+## the mesh, which put a rebuild of the whole island - most of a second of work
+## and every tile's geometry with it - behind every step of the tide, and left
+## the far sea sitting at the old level in the meantime. The mesh now carries
+## only the bed, and far_terrain.gdshader floats the sea onto it from
+## `_push_far_sea`, so there is nothing to rebuild and nothing to lag.
 func _create_far_terrain() -> void:
 	_far = Node3D.new()
 	_far.name = "FarTerrain"
 	_far.visible = false
 	add_child(_far)
-	_dispatch_far_terrain()
-
-
-func _dispatch_far_terrain() -> void:
-	_far_dirty = false
-	_far_job_water = water_level
 	_mutex.lock()
 	_far_built = false
 	_far_tiles = []
@@ -339,22 +345,12 @@ func _dispatch_far_terrain() -> void:
 	_far_job = WorkerThreadPool.add_task(_far_job_run, false, "far_terrain")
 
 
-## Repaints the distant island for the level the water now stands at. The land
-## it carries has not changed - only which of it reads as ocean and how deep
-## that ocean looks - but that is baked into the mesh, so the mesh is rebuilt.
-##
-## A job already in flight is left to finish rather than cancelled, and the
-## rebuild is folded into the moment it lands.
-func _rebuild_far_terrain() -> void:
-	if _far_job >= 0:
-		_far_dirty = true
-		return
-	_dispatch_far_terrain()
-
-
 func _far_job_run() -> void:
-	var tiles := FarTerrain.build(gen, _far_job_water, far_extent, far_step,
-		far_drop)
+	# The bottom of the tide's range, not the level the water is at: it is what
+	# decides which blocks may be folded away and how far the mesh is sunk under
+	# the real surface, and both have to hold at every level the tide can reach.
+	var tiles := FarTerrain.build(gen,
+		VoxelDefs.SEA_DATUM + tide_low, far_extent, far_step, far_drop)
 	_mutex.lock()
 	_far_tiles = tiles
 	_far_built = true
@@ -376,11 +372,6 @@ func _integrate_far_terrain() -> void:
 	_far_tiles = []
 	if _far == null:
 		return
-	# A repaint replaces the whole mesh; on the first build there is nothing
-	# hanging here yet and this does nothing.
-	for old in _far.get_children():
-		_far.remove_child(old)
-		old.queue_free()
 	for t in tiles:
 		var mi := MeshInstance3D.new()
 		mi.mesh = t["mesh"]
@@ -395,13 +386,6 @@ func _integrate_far_terrain() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON \
 			if t["has_land"] else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_far.add_child(mi)
-	# The tide moved again while this mesh was being painted, so the mesh that
-	# just landed is already out of date; go round again rather than announcing
-	# a level the water has left.
-	if _far_dirty:
-		_rebuild_far_terrain()
-	else:
-		tide_changed.emit(water_level)
 
 
 ## The sea is a single plane that is kept centred on the player. Its waves are
@@ -433,12 +417,9 @@ func _advance_tide(delta: float) -> void:
 	if is_equal_approx(water_level, _tide_target):
 		return
 	water_level = move_toward(water_level, _tide_target, tide_speed * delta)
-	# The painted ocean out past the mist is baked, so it is repainted once the
-	# water comes to rest rather than on every frame of the climb. Until then
-	# the far mesh is a little stale, which the haze covers.
 	if is_equal_approx(water_level, _tide_target):
 		water_level = _tide_target
-		_rebuild_far_terrain()
+		tide_changed.emit(water_level)
 
 
 ## Sets the level the water eases towards, clamped to the tide's range.
@@ -448,7 +429,7 @@ func set_tide(water_y: float, immediate := false) -> void:
 		VoxelDefs.SEA_DATUM + tide_high)
 	if immediate:
 		water_level = _tide_target
-		_rebuild_far_terrain()
+		tide_changed.emit(water_level)
 
 
 ## The tide target, so a HUD can show where the water is heading.
@@ -496,7 +477,16 @@ func teleport_to_structures() -> void:
 	_update_center(true)
 
 
+## Tells the distant island where the water is. The far mesh is the sea bed and
+## nothing more; this is the whole of what makes an ocean of it, which is why
+## the tide costs two uniforms a frame rather than a rebuild.
+func _push_far_sea() -> void:
+	_far_material.set_shader_parameter("sea_y", water_level)
+	_far_canopy_material.set_shader_parameter("sea_y", water_level)
+
+
 func _update_water() -> void:
+	_push_far_sea()
 	if _water == null:
 		return
 	var p := get_node_or_null(player_path)
