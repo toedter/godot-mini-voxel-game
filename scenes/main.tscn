@@ -139,6 +139,8 @@ script = ExtResource("13_interior")
 [node name="SunDial" type="StaticBody3D" parent="."]
 script = ExtResource("15_dial")
 prompt = "Turn the dial"
+locked = true
+unlocked_by = NodePath("../Pedestal")
 
 [node name="Place" type="Node" parent="SunDial"]
 script = ExtResource("10_place")

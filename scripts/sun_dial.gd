@@ -7,7 +7,9 @@ extends Interactable
 ## tide's: the debug keys scrub time in half-hour steps because that is useful
 ## while building, but a dial instead steps between a few named times of day,
 ## because a lever a puzzle can be built against needs a short, predictable
-## list of states rather than a slider.
+## list of states rather than a slider. Also like TideLock, it can be seized
+## until a pedestal is filled, so it stays a puzzle's reward rather than a
+## switch thrown once at the start.
 
 ## The times of day this dial cycles through, as DayNight.time_of_day
 ## fractions (0 midnight, 0.25 dawn, 0.5 noon, 0.75 dusk). Ordered so that
@@ -15,6 +17,13 @@ extends Interactable
 @export var notches: PackedFloat32Array = PackedFloat32Array([0.25, 0.5, 0.75, 0.0])
 @export var notch_names: PackedStringArray = PackedStringArray(["dawn", "noon", "dusk", "midnight"])
 @export var day_path: NodePath = ^"../Sun"
+## A seized dial will not turn until something releases it, the same as
+## TideLock: it stays the reward for a puzzle rather than a switch anyone
+## can throw from the start.
+@export var locked: bool = false
+@export var locked_prompt: String = "The dial is seized"
+## A pedestal that has to be filled before this dial will turn.
+@export var unlocked_by: NodePath
 
 var _day: DayNight
 var _index := 0
@@ -34,6 +43,7 @@ func _ready() -> void:
 	super()
 	_day = get_node_or_null(day_path) as DayNight
 	_build_body()
+	_bind_key()
 	# Start facing wherever the sun already is, so the first turn moves
 	# somewhere the player has not just been.
 	if _day != null:
@@ -109,7 +119,7 @@ func _build_body() -> void:
 
 
 func _on_use(_actor: Node3D) -> void:
-	if _day == null or notches.is_empty():
+	if locked or _day == null or notches.is_empty():
 		return
 	_index = (_index + 1) % notches.size()
 	var target := fposmod(notches[_index], 1.0)
@@ -146,7 +156,38 @@ func _name_of(i: int) -> String:
 	return notch_names[i] if i < notch_names.size() else "%.2f" % notches[i]
 
 
+## Watches the pedestal that holds this dial's key, if there is one.
+func _bind_key() -> void:
+	var key := get_node_or_null(unlocked_by) as Pedestal
+	if key == null:
+		return
+	key.filled.connect(_on_key_placed)
+	key.emptied.connect(_on_key_removed)
+	locked = not key.is_filled()
+
+
+func _on_key_placed(_item: Carryable) -> void:
+	unlock()
+
+
+func _on_key_removed(_item: Carryable) -> void:
+	locked = true
+	_update_prompt()
+
+
+## Releases the dial, so it can be turned. Wired to a pedestal being filled.
+func unlock() -> void:
+	if not locked:
+		return
+	locked = false
+	_update_prompt()
+
+
 func _update_prompt() -> void:
+	if locked:
+		prompt = locked_prompt
+		refresh_prompt()
+		return
 	var next := (_index + 1) % notches.size()
 	prompt = "Turn the dial to %s" % _name_of(next)
 	refresh_prompt()
