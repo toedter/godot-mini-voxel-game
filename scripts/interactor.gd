@@ -113,8 +113,15 @@ func focus_prompt() -> String:
 
 func _physics_process(_delta: float) -> void:
 	_update_focus()
-	if _focus != null and _pressed():
+	if not _pressed():
+		return
+	if _focus != null:
 		_focus.use(self)
+	elif _carried is Carryable:
+		# The held object is excluded from focus, so putting it down cannot
+		# point at it. With nothing else under the aim, that is the verb
+		# that is left, and the same press that takes an item gives it back.
+		(_carried as Carryable).drop()
 
 
 func _update_focus() -> void:

@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://addons/godot-xr-development-kit/player/components/gxdk_locomotion_handler.gd" id="1_loco"]
 [ext_resource type="Script" path="res://addons/godot-xr-development-kit/player/movement_providers/gxdk_raycast_body.gd" id="2_ray"]
@@ -9,6 +9,9 @@
 [ext_resource type="Script" path="res://scripts/interactor.gd" id="7_interactor"]
 [ext_resource type="Script" path="res://scripts/xr_jump.gd" id="8_jump"]
 [ext_resource type="Script" path="res://scripts/xr_ruins_button.gd" id="9_ruins"]
+[ext_resource type="Script" path="res://scripts/xr_hand.gd" id="10_hand"]
+[ext_resource type="Resource" path="res://resources/finger_poses_closed.tres" id="11_closed"]
+[ext_resource type="Resource" path="res://resources/finger_poses_open.tres" id="12_open"]
 
 [node name="XRPlayer" type="CharacterBody3D"]
 collision_mask = 255
@@ -36,6 +39,17 @@ far = 1500.0
 
 [node name="LeftHand" type="XRController3D" parent="XROrigin3D"]
 tracker = &"left_hand"
+pose = &"palm_pose"
+
+[node name="Hand" type="Node3D" parent="XROrigin3D/LeftHand"]
+script = ExtResource("10_hand")
+closed_finger_poses = ExtResource("11_closed")
+open_finger_poses = ExtResource("12_open")
+
+[node name="Interactor" type="Node3D" parent="XROrigin3D/LeftHand"]
+script = ExtResource("7_interactor")
+carry_offset = Vector3(0, -0.25, -0.03)
+carry_rotation_degrees = Vector3(0, 0, 0)
 
 [node name="RuinsButton" type="Node3D" parent="XROrigin3D/LeftHand"]
 script = ExtResource("9_ruins")
@@ -49,6 +63,12 @@ strafe_movement_speed = 3.0
 
 [node name="RightHand" type="XRController3D" parent="XROrigin3D"]
 tracker = &"right_hand"
+pose = &"palm_pose"
+
+[node name="Hand" type="Node3D" parent="XROrigin3D/RightHand"]
+script = ExtResource("10_hand")
+closed_finger_poses = ExtResource("11_closed")
+open_finger_poses = ExtResource("12_open")
 
 [node name="SnapTurn" type="Node3D" parent="XROrigin3D/RightHand"]
 script = ExtResource("6_snap")
@@ -57,7 +77,7 @@ step_angle = 0.5235988
 
 [node name="Interactor" type="Node3D" parent="XROrigin3D/RightHand"]
 script = ExtResource("7_interactor")
-carry_offset = Vector3(0, -0.02, -0.09)
+carry_offset = Vector3(0, -0.25, -0.03)
 carry_rotation_degrees = Vector3(0, 0, 0)
 
 [node name="Jump" type="Node3D" parent="XROrigin3D/RightHand"]

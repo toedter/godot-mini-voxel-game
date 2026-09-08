@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="GXDKFingerPoses" format=3]
+
+[ext_resource type="Script" path="res://addons/godot-xr-development-kit/hands/poses/gxdk_finger_poses.gd" id="1_poses"]
+
+[resource]
+script = ExtResource("1_poses")
+thumb_enabled = true
+thumb_spread = 0.0
+thumb_metacarpal_curl = 0.0
+thumb_proximal_curl = 0.1
+thumb_distal_curl = 0.1
+index_enabled = true
+index_spread = 0.0
+index_proximal_curl = 0.1
+index_intermediate_curl = 0.1
+index_distal_curl = 0.1
+middle_enabled = true
+middle_spread = 0.0
+middle_proximal_curl = 0.1
+middle_intermediate_curl = 0.1
+middle_distal_curl = 0.1
+ring_enabled = true
+ring_spread = 0.0
+ring_proximal_curl = 0.1
+ring_intermediate_curl = 0.1
+ring_distal_curl = 0.1
+little_enabled = true
+little_spread = 0.0
+little_proximal_curl = 0.1
+little_intermediate_curl = 0.1
+little_distal_curl = 0.1

@@ -81,8 +81,15 @@ func _process(_delta: float) -> void:
 ## queued for deletion during that swap, so for a frame there are two in the
 ## group and the disabled one has to be stepped over.
 func _active_interactor() -> Interactor:
+	var fallback: Interactor = null
 	for n in get_tree().get_nodes_in_group("interactor"):
 		var it := n as Interactor
-		if it != null and not it.is_queued_for_deletion() and it.can_process():
+		if it == null or it.is_queued_for_deletion() or not it.can_process():
+			continue
+		# In XR there is one per hand, and the line belongs to the hand that
+		# is actually pointing at something.
+		if it.focus() != null:
 			return it
-	return null
+		if fallback == null:
+			fallback = it
+	return fallback
