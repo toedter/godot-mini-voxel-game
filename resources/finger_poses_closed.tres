@@ -5,10 +5,10 @@
 [resource]
 script = ExtResource("1_poses")
 thumb_enabled = true
-thumb_spread = -0.12
-thumb_metacarpal_curl = 0.4
-thumb_proximal_curl = 0.8
-thumb_distal_curl = 0.5
+thumb_spread = -0.22
+thumb_metacarpal_curl = 0.18
+thumb_proximal_curl = 0.35
+thumb_distal_curl = 0.2
 index_enabled = true
 index_spread = 0.0
 index_proximal_curl = 0.9
