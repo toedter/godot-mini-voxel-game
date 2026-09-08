@@ -21,9 +21,13 @@ var _index := 0
 var _dial: Node3D
 var _sun: MeshInstance3D
 var _moon: MeshInstance3D
-var _angle := 0.0
+## Continuous, never-wrapped time of day: lets each turn add a forward delta
+## instead of snapping backward across midnight, and drives the needle and
+## the light from the same number so they can never drift out of sync.
+var _time := 0.0
 
 const RADIUS := 0.26
+const TURN_SECONDS := 5.0
 
 
 func _ready() -> void:
@@ -33,12 +37,13 @@ func _ready() -> void:
 	# Start facing wherever the sun already is, so the first turn moves
 	# somewhere the player has not just been.
 	if _day != null:
-		_index = _nearest_notch(_day.time_of_day)
-		_orient_dial(false)
+		_time = _day.time_of_day
+		_index = _nearest_notch(_time)
+		_dial.rotation.x = TAU * (_time - 0.5)
 	_update_prompt()
 
 
-## A stone plinth with an armillary needle on top: sun and moon spheres ride
+## A stone plinth with an armillary needle on top: sun and moon cubes ride
 ## opposite ends of a rotating bar, tracing the same vertical arc the light
 ## itself follows, so the player can see where a notch will land before
 ## committing to it.
@@ -80,19 +85,17 @@ func _build_body() -> void:
 	_dial.add_child(needle)
 
 	_sun = MeshInstance3D.new()
-	var ss := SphereMesh.new()
-	ss.radius = 0.09
-	ss.height = 0.18
-	_sun.mesh = ss
+	var sb := BoxMesh.new()
+	sb.size = Vector3(0.16, 0.16, 0.16)
+	_sun.mesh = sb
 	_sun.material_override = sun_mat
 	_sun.position = Vector3(0.0, RADIUS, 0.0)
 	_dial.add_child(_sun)
 
 	_moon = MeshInstance3D.new()
-	var ms := SphereMesh.new()
-	ms.radius = 0.07
-	ms.height = 0.14
-	_moon.mesh = ms
+	var mb := BoxMesh.new()
+	mb.size = Vector3(0.13, 0.13, 0.13)
+	_moon.mesh = mb
 	_moon.material_override = moon_mat
 	_moon.position = Vector3(0.0, -RADIUS, 0.0)
 	_dial.add_child(_moon)
@@ -109,29 +112,26 @@ func _on_use(_actor: Node3D) -> void:
 	if _day == null or notches.is_empty():
 		return
 	_index = (_index + 1) % notches.size()
-	_day.set_time_of_day(notches[_index])
-	_orient_dial(true)
+	var target := fposmod(notches[_index], 1.0)
+	var delta := target - fposmod(_time, 1.0)
+	if delta <= 0.0:
+		delta += 1.0
+	var t := create_tween()
+	t.tween_method(_advance_to, _time, _time + delta, TURN_SECONDS) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_update_prompt()
 
 
-## Rotates the needle so the sun sphere sits where the notch puts it in the
-## sky (up at noon, down at midnight, level with the plinth at dawn/dusk).
-## Always spins forward rather than snapping back, the same feedback the tide
-## lock's wheel gives: something visibly happened before the light catches up.
-func _orient_dial(animate: bool) -> void:
-	if _dial == null:
-		return
-	var target := fposmod(TAU * (notches[_index] - 0.5), TAU)
-	if animate:
-		var delta := target - fposmod(_angle, TAU)
-		if delta <= 0.0:
-			delta += TAU
-		_angle += delta
-		var t := create_tween()
-		t.tween_property(_dial, "rotation:x", _angle, 0.5).set_trans(Tween.TRANS_CUBIC)
-	else:
-		_angle = target
-		_dial.rotation.x = _angle
+## Drives both the light and the needle from a single continuous time value,
+## called every step of the five second turn so a slow, deliberate pull on
+## the dial is what actually carries the sun and moon across the sky rather
+## than the visual catching up after the fact.
+func _advance_to(t: float) -> void:
+	_time = t
+	if _day != null:
+		_day.set_time_of_day(t)
+	if _dial != null:
+		_dial.rotation.x = TAU * (t - 0.5)
 
 
 func _nearest_notch(t: float) -> int:
