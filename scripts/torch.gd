@@ -93,25 +93,24 @@ func _build_body() -> void:
 
 
 ## A thin stream of embers off the flame tip. Built entirely from a procedural
-## quad and material, the same "no external art" rule everything else in the
-## world follows.
+## cube and material, the same "no external art" rule everything else in the
+## world follows - tiny tumbling voxels rather than flat billboards.
 func _build_embers() -> void:
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.035, 0.035)
+	var cube := BoxMesh.new()
+	cube.size = Vector3(0.03, 0.03, 0.03)
 
 	var ember_mat := StandardMaterial3D.new()
 	ember_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ember_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	ember_mat.vertex_color_use_as_albedo = true
-	ember_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	ember_mat.emission_enabled = true
 	ember_mat.emission = Color(1.0, 0.6, 0.2)
 	ember_mat.emission_energy_multiplier = 3.0
-	quad.material = ember_mat
+	cube.material = ember_mat
 
 	var fade := Gradient.new()
-	fade.set_color(0, Color(1.0, 0.85, 0.4, 1.0))
-	fade.set_color(1, Color(1.0, 0.3, 0.05, 0.0))
+	fade.set_color(0, Color(0.85, 0.35, 0.05, 1.0))
+	fade.set_color(1, Color(1.0, 0.85, 0.25, 0.0))
 	var fade_tex := GradientTexture1D.new()
 	fade_tex.gradient = fade
 
@@ -124,10 +123,20 @@ func _build_embers() -> void:
 	process_mat.scale_min = 0.5
 	process_mat.scale_max = 1.1
 	process_mat.color_ramp = fade_tex
+	# Random hue drift per ember, layered on top of the lifetime gradient, so
+	# no two embers read as the exact same shade of fire.
+	process_mat.hue_variation_min = -0.06
+	process_mat.hue_variation_max = 0.06
+	# Cubes tumble instead of billboarding flat toward the camera.
+	process_mat.particle_flag_rotate_y = true
+	process_mat.angle_min = -180.0
+	process_mat.angle_max = 180.0
+	process_mat.angular_velocity_min = -180.0
+	process_mat.angular_velocity_max = 180.0
 
 	_particles = GPUParticles3D.new()
 	_particles.process_material = process_mat
-	_particles.draw_pass_1 = quad
+	_particles.draw_pass_1 = cube
 	_particles.amount = ember_count
 	_particles.lifetime = 1.0
 	_particles.position = Vector3(0.0, 0.72, 0.0)
