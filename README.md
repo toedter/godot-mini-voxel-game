@@ -5,16 +5,17 @@ A small first-person exploration game built in [Godot 4.7](https://godotengine.o
 ## Screenshots
 
 ![The drowned ruin at low tide](screenshots/platform.jpg)
-![Grassland at night](screenshots/night.jpg)
+![The drowned ruin at high tide (dawn)](screenshots/platform-flood-dawn.jpg)
+![Mushrooms at night](screenshots/night.jpg)
 
 ## Features
 
 - **One continuous island, generated from a seed.** A heightmap of 10 cm voxel columns rises out of the sea and blends between grassland, desert, beach and mountain biomes with no visible seams; the same terrain continues under the water as the sea bed.
 - **Living surface detail.** Wind-wobbled grass, trees, glowing fantasy mushrooms that light their surroundings, mist that thickens with distance, and a day/night cycle with a moving sun and moon.
-- **Tides as a game mechanic.** The sea rises and falls between authored notches — low, mean, and flood — reshaping which parts of the island are dry, and puzzles are built around what each tide level opens up or seals off.
-- **A drowned ruin and the vault beneath it.** Explore an authored structure sitting in the tideline, then descend into a five-chamber vault behind a stone gate. Carry a burning torch — flickering light, drifting embers — to a pedestal to free a seized tide lock, and use it to light the braziers deeper in.
+- **Tides and time as game mechanics.** The sea rises and falls between authored notches — low, mean, and flood — reshaping which parts of the island are dry. The sun and moon step between dawn, noon, dusk and midnight the same way, turned by a physical dial. Both the tide lock and the sun dial are puzzles built around what each level or time opens up or seals off.
+- **A drowned ruin and the vault beneath it.** Explore an authored structure sitting in the tideline, then descend into a five-chamber vault behind a stone gate. Carry a burning torch — flickering light, drifting embers — to a pedestal to free a seized tide lock and sun dial, and use it to light the braziers deeper in.
 - **Carryables, pedestals and interiors.** Pick things up, set them down, and step through doorways into rooms that hang below the terrain independent of the outdoor world.
-- **Save and load.** The island itself is never saved (it's a pure function of the seed) — only what changed: where you are, what the tide is doing, and what's sitting in which socket.
+- **Save and load.** The island itself is never saved (it's a pure function of the seed) — only what changed: where you are, what the tide and time of day are doing, and what's sitting in which socket.
 - **Seated VR support.** Built on the [Godot XR Development Kit](https://github.com/GodotVR/godot-xr-tools) with OpenXR. Smooth locomotion, snap turning, controller jump, and a debug teleport back to the ruins. Runs as an ordinary desktop game when no headset is present.
 
 ## Controls
@@ -36,6 +37,8 @@ A small first-person exploration game built in [Godot 4.7](https://godotengine.o
 | `T` | Jump to the ruins (debug) |
 | `Page Up` / `Page Down` | Nudge the tide by a metre (debug) |
 | `Home` | Reset the tide (debug) |
+| `[` / `]` | Nudge the sun/moon time by 30 minutes (debug) |
+| `End` | Reset the sun/moon time (debug) |
 | `H` | Toggle the debug info overlay |
 
 ### VR (OpenXR headset)
