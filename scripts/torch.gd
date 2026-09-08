@@ -15,11 +15,20 @@ extends Carryable
 ## How many embers drift up off the flame at once.
 @export_range(0, 40, 1) var ember_count: int = 14
 
+## Edge length of a stem voxel, well under the world's 10 cm block so a
+## hand-held torch still reads as many small blocks rather than one plank.
+const WOOD_VOXEL_SIZE := 0.025
+## The fire's cold and hot ends. Each little flame voxel sits somewhere
+## between the two, and drifts along that range as the flame flickers.
+const FLAME_COLD := Color(0.95, 0.35, 0.08)
+const FLAME_HOT := Color(1.0, 0.85, 0.25)
+
 var _light: OmniLight3D
-var _flame_mat: StandardMaterial3D
+var _flame_mats: Array[StandardMaterial3D] = []
 var _particles: GPUParticles3D
 var _noise := FastNoiseLite.new()
 var _time := 0.0
+var _wood_material: ShaderMaterial
 
 
 func _ready() -> void:
@@ -35,42 +44,15 @@ func _ready() -> void:
 
 
 func _build_body() -> void:
-	var wood := StandardMaterial3D.new()
-	wood.albedo_color = VoxelDefs.COLORS[VoxelDefs.WOOD]
-	wood.roughness = 0.9
-
-	var handle := MeshInstance3D.new()
-	var hm := BoxMesh.new()
-	hm.size = Vector3(0.07, 0.5, 0.07)
-	handle.mesh = hm
-	handle.material_override = wood
+	var handle := _wood_box(Vector3(0.07, 0.5, 0.07))
 	handle.position = Vector3(0.0, 0.25, 0.0)
 	add_child(handle)
 
-	var head := MeshInstance3D.new()
-	var hem := BoxMesh.new()
-	hem.size = Vector3(0.14, 0.16, 0.14)
-	head.mesh = hem
-	head.material_override = wood
+	var head := _wood_box(Vector3(0.14, 0.16, 0.14))
 	head.position = Vector3(0.0, 0.53, 0.0)
 	add_child(head)
 
-	# What the fire looks like: an emissive block sitting in the wound head,
-	# the same trick the brazier's ash bed uses.
-	_flame_mat = StandardMaterial3D.new()
-	_flame_mat.albedo_color = Color(0.95, 0.55, 0.22)
-	_flame_mat.emission_enabled = true
-	_flame_mat.emission = Color(1.0, 0.66, 0.3)
-	_flame_mat.emission_energy_multiplier = 2.6
-	_flame_mat.roughness = 1.0
-
-	var flame := MeshInstance3D.new()
-	var fm := BoxMesh.new()
-	fm.size = Vector3(0.1, 0.18, 0.1)
-	flame.mesh = fm
-	flame.material_override = _flame_mat
-	flame.position = Vector3(0.0, 0.68, 0.0)
-	add_child(flame)
+	_build_flame()
 
 	_light = OmniLight3D.new()
 	_light.light_color = Color(1.0, 0.66, 0.3)
@@ -90,6 +72,69 @@ func _build_body() -> void:
 	shape.shape = box
 	shape.position = Vector3(0.0, 0.38, 0.0)
 	add_child(shape)
+
+
+## A wood-shaded box: the same per-voxel dithering the trees are built from,
+## just with a voxel size small enough that a 7 cm handle still shows several
+## of them, instead of one flat plank.
+func _wood_box(size: Vector3) -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.mesh = _colored_box_mesh(size, VoxelDefs.color_of(VoxelDefs.WOOD))
+	mesh_instance.material_override = _wood_material_instance()
+	return mesh_instance
+
+
+func _wood_material_instance() -> ShaderMaterial:
+	if _wood_material == null:
+		_wood_material = ShaderMaterial.new()
+		_wood_material.shader = preload("res://shaders/voxel_prop.gdshader")
+		_wood_material.set_shader_parameter("voxel_size", WOOD_VOXEL_SIZE)
+		_wood_material.set_shader_parameter("tint_scale", 1.0)
+	return _wood_material
+
+
+## A box mesh carrying an explicit per-vertex colour, so it can ride the
+## world's own voxel shader (which reads its tint from vertex colour) instead
+## of a flat material.
+func _colored_box_mesh(size: Vector3, color: Color) -> ArrayMesh:
+	var box := BoxMesh.new()
+	box.size = size
+	var arrays := box.surface_get_arrays(0)
+	var vertex_count: int = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	var colors := PackedColorArray()
+	colors.resize(vertex_count)
+	colors.fill(color)
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var array_mesh := ArrayMesh.new()
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return array_mesh
+
+
+## The fire itself: a short stack of small emissive voxels, tapering as it
+## rises and jittered off-centre, so it reads as a lit flame built from the
+## same blocky kit as the rest of the torch rather than one smooth blob.
+func _build_flame() -> void:
+	const CUBE_COUNT := 6
+	for i in CUBE_COUNT:
+		var t := float(i) / float(CUBE_COUNT - 1)
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.emission_enabled = true
+		var col := FLAME_COLD.lerp(FLAME_HOT, t)
+		mat.albedo_color = col
+		mat.emission = col
+		mat.emission_energy_multiplier = 2.4 + t * 1.2
+
+		var cube := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		var s := lerpf(0.09, 0.045, t)
+		box.size = Vector3(s, s, s)
+		cube.mesh = box
+		cube.material_override = mat
+		cube.position = Vector3(
+			randf_range(-0.015, 0.015), 0.6 + t * 0.22, randf_range(-0.015, 0.015))
+		add_child(cube)
+		_flame_mats.append(mat)
 
 
 ## A thin stream of embers off the flame tip. Built entirely from a procedural
@@ -150,5 +195,14 @@ func _process(delta: float) -> void:
 	var n := _noise.get_noise_1d(_time)
 	var flicker := 1.0 + n * flicker_depth
 	_light.light_energy = light_energy * flicker
-	if _flame_mat != null:
-		_flame_mat.emission_energy_multiplier = 2.6 * flicker
+	# The same noise that breathes the light also drags every flame voxel
+	# between the cold and hot ends of the fire, so the flame keeps shifting
+	# colour for as long as it keeps throwing embers off its tip.
+	var shift := clampf(n * 0.5 + 0.5, 0.0, 1.0)
+	for i in _flame_mats.size():
+		var mat := _flame_mats[i]
+		var t := float(i) / float(maxi(_flame_mats.size() - 1, 1))
+		var col := FLAME_COLD.lerp(FLAME_HOT, clampf(t * 0.7 + shift * 0.3, 0.0, 1.0))
+		mat.albedo_color = col
+		mat.emission = col
+		mat.emission_energy_multiplier = (2.4 + t * 1.2) * flicker
