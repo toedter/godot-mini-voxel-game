@@ -18,6 +18,11 @@ extends DirectionalLight3D
 @export_range(5.0, 80.0, 1.0) var arc_tilt: float = 35.0
 @export var sun_energy: float = 0.9
 @export var moon_energy: float = 0.16
+## How far a single manual nudge moves the sun/moon along their arc: 1/48 of a
+## day is half an hour. Mirrors VoxelWorld's tide_step - a debug control today,
+## and the same knob a future mechanic keyed off light (crop growth, something
+## that only comes out at night) would want to drive directly.
+@export_range(0.001, 0.25, 0.001) var time_step: float = 1.0 / 48.0
 
 const DAY_TOP := Color(0.25, 0.48, 0.9)
 const DAY_HORIZON := Color(0.72, 0.83, 0.93)
@@ -38,8 +43,7 @@ var sun_height: float = 0.0
 
 func _ready() -> void:
 	add_to_group("savable")
-	time_of_day = start_time
-	_apply()
+	set_time_of_day(start_time)
 
 
 func _process(delta: float) -> void:
@@ -50,9 +54,26 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if (event as InputEventKey).keycode == KEY_P:
+	if not (event is InputEventKey) or not event.is_pressed() or event.is_echo():
+		return
+	match (event as InputEventKey).keycode:
+		KEY_P:
 			paused = not paused
+		KEY_BRACKETRIGHT:
+			set_time_of_day(time_of_day + time_step)
+		KEY_BRACKETLEFT:
+			set_time_of_day(time_of_day - time_step)
+		KEY_END:
+			set_time_of_day(start_time)
+
+
+## Jumps the sun (and its anti-solar moon) straight to a time of day, wrapped
+## to a single cycle. Used by manual scrubbing, by the reset key and by a
+## restored save; the automatic advance in _process picks up smoothly from
+## wherever this leaves it.
+func set_time_of_day(t: float) -> void:
+	time_of_day = fposmod(t, 1.0)
+	_apply()
 
 
 func _apply() -> void:
@@ -119,5 +140,5 @@ func save_state() -> Dictionary:
 
 
 func load_state(d: Dictionary) -> void:
-	time_of_day = float(d.get("time", start_time))
+	set_time_of_day(float(d.get("time", start_time)))
 	paused = bool(d.get("paused", false))

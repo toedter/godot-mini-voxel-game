@@ -47,7 +47,7 @@ func _process(_delta: float) -> void:
 	if _music != null:
 		hint += "   M music: %s" % ("on" if _music.is_music_enabled() else "off")
 	if _day != null:
-		hint += "   P pause time"
+		hint += "   [ ] sun/moon time   End reset time   P pause time"
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		hint = "Click into the window to capture the mouse and look around"
 

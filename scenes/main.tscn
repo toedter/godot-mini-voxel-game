@@ -14,6 +14,7 @@
 [ext_resource type="Script" path="res://scripts/torch.gd" id="12_torch"]
 [ext_resource type="Script" path="res://scripts/interior.gd" id="13_interior"]
 [ext_resource type="Script" path="res://scripts/save_game.gd" id="14_save"]
+[ext_resource type="Script" path="res://scripts/sun_dial.gd" id="15_dial"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_1"]
 sky_top_color = Color(0.25, 0.48, 0.9, 1)
@@ -134,6 +135,14 @@ offset = Vector3(-4, 0, -0.5)
 
 [node name="Vault" type="Node3D" parent="."]
 script = ExtResource("13_interior")
+
+[node name="SunDial" type="StaticBody3D" parent="."]
+script = ExtResource("15_dial")
+prompt = "Turn the dial"
+
+[node name="Place" type="Node" parent="SunDial"]
+script = ExtResource("10_place")
+offset = Vector3(0, 0, -1.9)
 
 [node name="SaveGame" type="Node" parent="."]
 script = ExtResource("14_save")
