@@ -134,12 +134,26 @@ func _process_modification() -> void:
 		# We animate based on bone_name.
 		var bone_name = skeleton.get_bone_name(i)
 		if finger_poses.thumb_enabled and (bone_name == "LeftThumbMetacarpal" or bone_name == "RightThumbMetacarpal"):
-			t.basis = t.basis.rotated(Vector3(1.0, 0.0, 0.0), finger_poses.thumb_spread)
-			t.basis = t.basis.rotated(Vector3(0.0, 0.0, 1.0), finger_poses.thumb_metacarpal_curl * (1.0 if hand == 1 else -1.0))
+			var spread: float = finger_poses.thumb_spread
+			var curl: float = finger_poses.thumb_metacarpal_curl
+			if open_finger_poses and open_finger_poses.thumb_enabled:
+				spread = lerp(open_finger_poses.thumb_spread, spread, grip)
+				curl = lerp(open_finger_poses.thumb_metacarpal_curl, curl, grip)
+
+			t.basis = t.basis.rotated(Vector3(1.0, 0.0, 0.0), spread)
+			t.basis = t.basis.rotated(Vector3(0.0, 0.0, 1.0), curl * (1.0 if hand == 1 else -1.0))
 		elif finger_poses.thumb_enabled and (bone_name == "LeftThumbProximal" or bone_name == "RightThumbProximal"):
-			t.basis = t.basis.rotated(Vector3(1.0, 0.0, 0.0), finger_poses.thumb_proximal_curl)
+			var curl: float = finger_poses.thumb_proximal_curl
+			if open_finger_poses and open_finger_poses.thumb_enabled:
+				curl = lerp(open_finger_poses.thumb_proximal_curl, curl, grip)
+
+			t.basis = t.basis.rotated(Vector3(1.0, 0.0, 0.0), curl)
 		elif finger_poses.thumb_enabled and (bone_name == "LeftThumbDistal" or bone_name == "RightThumbDistal"):
-			t.basis = t.basis.rotated(Vector3(1.0, 0.0, 0.0), finger_poses.thumb_distal_curl)
+			var curl: float = finger_poses.thumb_distal_curl
+			if open_finger_poses and open_finger_poses.thumb_enabled:
+				curl = lerp(open_finger_poses.thumb_distal_curl, curl, grip)
+
+			t.basis = t.basis.rotated(Vector3(1.0, 0.0, 0.0), curl)
 
 		elif finger_poses.index_enabled and (bone_name == "LeftIndexProximal" or bone_name == "RightIndexProximal"):
 			var spread: float = finger_poses.index_spread

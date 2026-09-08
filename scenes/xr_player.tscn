@@ -42,14 +42,15 @@ tracker = &"left_hand"
 pose = &"palm_pose"
 
 [node name="Hand" type="Node3D" parent="XROrigin3D/LeftHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.2)
 script = ExtResource("10_hand")
 closed_finger_poses = ExtResource("11_closed")
 open_finger_poses = ExtResource("12_open")
 
 [node name="Interactor" type="Node3D" parent="XROrigin3D/LeftHand"]
 script = ExtResource("7_interactor")
-carry_offset = Vector3(0, -0.25, -0.03)
-carry_rotation_degrees = Vector3(0, 0, 0)
+carry_offset = Vector3(0, -0.13, 0.14)
+carry_rotation_degrees = Vector3(-15, 0, 0)
 
 [node name="RuinsButton" type="Node3D" parent="XROrigin3D/LeftHand"]
 script = ExtResource("9_ruins")
@@ -66,6 +67,7 @@ tracker = &"right_hand"
 pose = &"palm_pose"
 
 [node name="Hand" type="Node3D" parent="XROrigin3D/RightHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.2)
 script = ExtResource("10_hand")
 closed_finger_poses = ExtResource("11_closed")
 open_finger_poses = ExtResource("12_open")
@@ -77,8 +79,8 @@ step_angle = 0.5235988
 
 [node name="Interactor" type="Node3D" parent="XROrigin3D/RightHand"]
 script = ExtResource("7_interactor")
-carry_offset = Vector3(0, -0.25, -0.03)
-carry_rotation_degrees = Vector3(0, 0, 0)
+carry_offset = Vector3(0, -0.13, 0.14)
+carry_rotation_degrees = Vector3(-15, 0, 0)
 
 [node name="Jump" type="Node3D" parent="XROrigin3D/RightHand"]
 script = ExtResource("8_jump")
