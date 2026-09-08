@@ -16,7 +16,7 @@ A small first-person exploration game built in [Godot 4.7](https://godotengine.o
 - **A drowned ruin and the vault beneath it.** Explore an authored structure sitting in the tideline, then descend into a five-chamber vault behind a stone gate. Carry a burning torch — flickering light, drifting embers — to a pedestal to free a seized tide lock and sun dial, and use it to light the braziers deeper in.
 - **Carryables, pedestals and interiors.** Pick things up, set them down, and step through doorways into rooms that hang below the terrain independent of the outdoor world.
 - **Save and load.** The island itself is never saved (it's a pure function of the seed) — only what changed: where you are, what the tide and time of day are doing, and what's sitting in which socket.
-- **Seated VR support.** Built on the [Godot XR Development Kit](https://github.com/GodotVR/godot-xr-tools) with OpenXR. Smooth locomotion, snap turning, controller jump, and a debug teleport back to the ruins. Runs as an ordinary desktop game when no headset is present.
+- **Seated VR support.** Built on the [Godot XR Development Kit](https://github.com/BastiaanOlij/godot-xr-development-kit) with OpenXR. Smooth locomotion, snap turning, controller jump, and a debug teleport back to the ruins. Runs as an ordinary desktop game when no headset is present.
 
 ## Controls
 
