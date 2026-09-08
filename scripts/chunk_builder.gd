@@ -33,6 +33,14 @@ const KEY_DZ := 1 << KEY_Z
 const VS := VoxelDefs.VOXEL_SIZE
 const MS := CS + 2 # stride of the heightmap incl. a 1 column margin
 
+## Corner ambient occlusion brightness, indexed by how many of the 3 relevant
+## neighbour cells are solid (0 = none, so full brightness; 3 = a nook boxed
+## in on both sides, the darkest a single vertex gets). Baked as sRGB vertex
+## colour, so these read a little lighter than the final darkening once the
+## voxel shader's gamma decode is applied - tuned by eye against that, not
+## against the raw numbers.
+const AO_LEVELS: Array[float] = [1.0, 0.93, 0.86, 0.78]
+
 var _gen: TerrainGen
 var _cx: int
 var _cz: int
@@ -190,7 +198,13 @@ func _m(lx: int, lz: int) -> int:
 ## once and then written by index. `push_back` on a packed array re-checks and
 ## grows its buffer on every single call, and this is the busiest function in
 ## the builder.
-func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Color, collide: bool) -> void:
+##
+## `ao`, if given, is one brightness per corner (a, b, c, d, in that order)
+## from AO_LEVELS. Baked straight into the vertex colour rather than carried
+## as its own channel - there is no spare component left in COLOR, since alpha
+## already carries the per-material tint strength the voxel shader dithers by.
+func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Color, collide: bool,
+		ao: PackedFloat32Array = PackedFloat32Array()) -> void:
 	if _sway:
 		var s := _sway_verts.size()
 		var si := _sway_idx.size()
@@ -251,13 +265,39 @@ func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Colo
 	_verts[base + 3] = d
 	for k in 4:
 		_norms[base + k] = n
-		_cols[base + k] = col
-	_idx[bi] = base
-	_idx[bi + 1] = base + 2
-	_idx[bi + 2] = base + 1
-	_idx[bi + 3] = base
-	_idx[bi + 4] = base + 3
-	_idx[bi + 5] = base + 2
+	if ao.is_empty():
+		for k in 4:
+			_cols[base + k] = col
+		_idx[bi] = base
+		_idx[bi + 1] = base + 2
+		_idx[bi + 2] = base + 1
+		_idx[bi + 3] = base
+		_idx[bi + 4] = base + 3
+		_idx[bi + 5] = base + 2
+	else:
+		_cols[base] = Color(col.r * ao[0], col.g * ao[0], col.b * ao[0], col.a)
+		_cols[base + 1] = Color(col.r * ao[1], col.g * ao[1], col.b * ao[1], col.a)
+		_cols[base + 2] = Color(col.r * ao[2], col.g * ao[2], col.b * ao[2], col.a)
+		_cols[base + 3] = Color(col.r * ao[3], col.g * ao[3], col.b * ao[3], col.a)
+		# Once the corners are uneven, which diagonal the quad is split along
+		# starts to matter: cutting through the two corners that happen to be
+		# brighter lets one triangle wash out a dark corner the other one is
+		# honouring. Splitting through the darker diagonal keeps both
+		# triangles agreeing on where the shadow falls.
+		if ao[0] + ao[2] > ao[1] + ao[3]:
+			_idx[bi] = base
+			_idx[bi + 1] = base + 3
+			_idx[bi + 2] = base + 1
+			_idx[bi + 3] = base + 1
+			_idx[bi + 4] = base + 3
+			_idx[bi + 5] = base + 2
+		else:
+			_idx[bi] = base
+			_idx[bi + 1] = base + 2
+			_idx[bi + 2] = base + 1
+			_idx[bi + 3] = base
+			_idx[bi + 4] = base + 3
+			_idx[bi + 5] = base + 2
 	if collide and _want_collision:
 		_collide_quad(a, b, c, d)
 
@@ -273,9 +313,38 @@ func _collide_quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
 	_col_faces[f + 5] = c
 
 
+## Standard voxel corner AO (see 0fps "Ambient Occlusion for Minecraft-like
+## worlds"): `side1`/`side2` are whether the two cells sharing an edge with
+## this corner are solid, `corner` is the cell only sharing the point. Two
+## solid sides box the corner in regardless of the diagonal, so that case is
+## forced to the darkest level rather than counted.
+func _vertex_ao(side1: bool, side2: bool, corner: bool) -> float:
+	if side1 and side2:
+		return AO_LEVELS[3]
+	return AO_LEVELS[int(side1) + int(side2) + int(corner)]
+
+
 # --------------------------------------------------------------------------
 # terrain meshing
 # --------------------------------------------------------------------------
+
+## AO for one corner of a merged top-face quad spanning columns x..x+w-1,
+## z..z+d-1 at height `h`. `at_x1`/`at_z1` say which edge of the rectangle
+## this corner sits on. A neighbouring column occludes the corner if it is
+## taller than the quad, the heightmap equivalent of a solid cell next to a
+## cube's corner: the two columns adjacent along an axis are `side1`/`side2`,
+## the one diagonally outside both is `corner`. The margin column sampled
+## with `_h` always exists, one past the chunk edge in every direction.
+func _top_corner_ao(x: int, z: int, w: int, d: int, h: int, at_x1: bool, at_z1: bool) -> float:
+	var ix := x + w - 1 if at_x1 else x
+	var iz := z + d - 1 if at_z1 else z
+	var ox := x + w if at_x1 else x - 1
+	var oz := z + d if at_z1 else z - 1
+	var side1 := _h(ox, iz) > h
+	var side2 := _h(ix, oz) > h
+	var corner := _h(ox, oz) > h
+	return _vertex_ao(side1, side2, corner)
+
 
 func _mesh_terrain_top() -> void:
 	# The ground only goes into the collision triangle soup when the cheaper
@@ -319,9 +388,15 @@ func _mesh_terrain_top() -> void:
 			var x1 := float(x + w) * VS
 			var z0 := float(z) * VS
 			var z1 := float(z + d) * VS
+			var ao := PackedFloat32Array([
+				_top_corner_ao(x, z, w, d, h, false, false), # (x0, z0)
+				_top_corner_ao(x, z, w, d, h, false, true),  # (x0, z1)
+				_top_corner_ao(x, z, w, d, h, true, true),   # (x1, z1)
+				_top_corner_ao(x, z, w, d, h, true, false),  # (x1, z0)
+			])
 			_quad(
 				Vector3(x0, y, z0), Vector3(x0, y, z1), Vector3(x1, y, z1), Vector3(x1, y, z0),
-				Vector3.UP, VoxelDefs.color_of(m), soup)
+				Vector3.UP, VoxelDefs.color_of(m), soup, ao)
 
 
 func _mesh_terrain_sides() -> void:
@@ -1397,7 +1472,45 @@ func _hidden(nx: int, ny: int, nz: int, nkey: int) -> bool:
 	return ny < _heights[(nz + 1) * MS + (nx + 1)]
 
 
+## Whether a feature-voxel neighbour offset by (ox, oy, oz) from (x, y, z) is
+## solid, for ambient occlusion corner sampling. Reuses `_hidden`'s occupancy
+## rule (buried in the terrain, or another feature voxel) - whatever blocks a
+## face from being drawn also blocks the ambient light reaching its corners.
+func _occ(x: int, y: int, z: int, ox: int, oy: int, oz: int) -> bool:
+	var nx := x + ox
+	var ny := y + oy
+	var nz := z + oz
+	var nkey := ny + (nx << KEY_X) + (nz << KEY_Z)
+	return _hidden(nx, ny, nz, nkey)
+
+
+## AO for the 4 corners of one cube face, in the same a/b/c/d order the face's
+## own quad is built in. `out` is the face's outward normal; `ax1`/`ax2` are
+## the two axes spanning its plane. `signs` gives each corner's offset along
+## those axes (one [s1, s2] pair per corner) - which is which depends on where
+## in the face that corner sits, worked out once per face direction below.
+func _face_ao(x: int, y: int, z: int, out: Vector3i, ax1: Vector3i, ax2: Vector3i,
+		signs: Array) -> PackedFloat32Array:
+	var res := PackedFloat32Array()
+	res.resize(4)
+	for i in 4:
+		var s1: int = signs[i][0]
+		var s2: int = signs[i][1]
+		var o1 := out + ax1 * s1
+		var o2 := out + ax2 * s2
+		var oc := out + ax1 * s1 + ax2 * s2
+		var side1 := _occ(x, y, z, o1.x, o1.y, o1.z)
+		var side2 := _occ(x, y, z, o2.x, o2.y, o2.z)
+		var corner := _occ(x, y, z, oc.x, oc.y, oc.z)
+		res[i] = _vertex_ao(side1, side2, corner)
+	return res
+
+
 func _mesh_features() -> void:
+	# Grass blades and glowing caps go into their own shaded surfaces and
+	# never reach the AO-aware branch of _quad, so there is no point spending
+	# the neighbour lookups on them.
+	var no_ao := PackedFloat32Array()
 	for key in _extras:
 		var mat: int = _extras[key]
 		var y: int = key & KEY_Y_MASK
@@ -1411,6 +1524,7 @@ func _mesh_features() -> void:
 		_glow = VoxelDefs.GLOW.has(mat)
 		if _glow:
 			_glow_uv = Vector2(VoxelDefs.GLOW[mat], _glow_phase.get(key, 0.0))
+		var want_ao := not _sway and not _glow
 		var x0 := float(x) * VS
 		var x1 := x0 + VS
 		var y0 := float(y) * VS
@@ -1418,23 +1532,35 @@ func _mesh_features() -> void:
 		var z0 := float(z) * VS
 		var z1 := z0 + VS
 		if not _hidden(x + 1, y, z, key + KEY_DX):
+			var ao := _face_ao(x, y, z, Vector3i(1, 0, 0), Vector3i(0, 1, 0), Vector3i(0, 0, 1),
+				[[-1, 1], [-1, -1], [1, -1], [1, 1]]) if want_ao else no_ao
 			_quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1),
-				Vector3.RIGHT, col, collide)
+				Vector3.RIGHT, col, collide, ao)
 		if not _hidden(x - 1, y, z, key - KEY_DX):
+			var ao := _face_ao(x, y, z, Vector3i(-1, 0, 0), Vector3i(0, 1, 0), Vector3i(0, 0, 1),
+				[[-1, -1], [-1, 1], [1, 1], [1, -1]]) if want_ao else no_ao
 			_quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0),
-				Vector3.LEFT, col, collide)
+				Vector3.LEFT, col, collide, ao)
 		if not _hidden(x, y + 1, z, key + 1):
+			var ao := _face_ao(x, y, z, Vector3i(0, 1, 0), Vector3i(1, 0, 0), Vector3i(0, 0, 1),
+				[[-1, -1], [-1, 1], [1, 1], [1, -1]]) if want_ao else no_ao
 			_quad(Vector3(x0, y1, z0), Vector3(x0, y1, z1), Vector3(x1, y1, z1), Vector3(x1, y1, z0),
-				Vector3.UP, col, collide)
+				Vector3.UP, col, collide, ao)
 		if not _hidden(x, y - 1, z, key - 1):
+			var ao := _face_ao(x, y, z, Vector3i(0, -1, 0), Vector3i(1, 0, 0), Vector3i(0, 0, 1),
+				[[-1, 1], [-1, -1], [1, -1], [1, 1]]) if want_ao else no_ao
 			_quad(Vector3(x0, y0, z1), Vector3(x0, y0, z0), Vector3(x1, y0, z0), Vector3(x1, y0, z1),
-				Vector3.DOWN, col, collide)
+				Vector3.DOWN, col, collide, ao)
 		if not _hidden(x, y, z + 1, key + KEY_DZ):
+			var ao := _face_ao(x, y, z, Vector3i(0, 0, 1), Vector3i(1, 0, 0), Vector3i(0, 1, 0),
+				[[-1, -1], [1, -1], [1, 1], [-1, 1]]) if want_ao else no_ao
 			_quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1),
-				Vector3.BACK, col, collide)
+				Vector3.BACK, col, collide, ao)
 		if not _hidden(x, y, z - 1, key - KEY_DZ):
+			var ao := _face_ao(x, y, z, Vector3i(0, 0, -1), Vector3i(1, 0, 0), Vector3i(0, 1, 0),
+				[[1, -1], [-1, -1], [-1, 1], [1, 1]]) if want_ao else no_ao
 			_quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0),
-				Vector3.FORWARD, col, collide)
+				Vector3.FORWARD, col, collide, ao)
 
 	_sway = false
 	_glow = false
