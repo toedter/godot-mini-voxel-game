@@ -36,6 +36,11 @@ extends Node3D
 
 var xr_active := false
 
+## The headset camera once the rig is active. Used by other systems (e.g. the
+## splash screen) that need to attach world-space content in front of the
+## player's view.
+var xr_camera: Camera3D
+
 var _xr_player: CharacterBody3D
 
 
@@ -93,6 +98,7 @@ func _swap_in_xr_player() -> void:
 	_xr_player = xr_player_scene.instantiate() as CharacterBody3D
 	_xr_player.name = "XRPlayer"
 	add_child(_xr_player)
+	xr_camera = _xr_player.get_node(^"XROrigin3D/XRCamera3D") as Camera3D
 
 
 ## The world, the atmosphere tint and the HUD all track "the player". Point
