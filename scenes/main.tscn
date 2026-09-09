@@ -15,6 +15,7 @@
 [ext_resource type="Script" path="res://scripts/interior.gd" id="13_interior"]
 [ext_resource type="Script" path="res://scripts/save_game.gd" id="14_save"]
 [ext_resource type="Script" path="res://scripts/sun_dial.gd" id="15_dial"]
+[ext_resource type="Script" path="res://scripts/splash.gd" id="16_splash"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_1"]
 sky_top_color = Color(0.25, 0.48, 0.9, 1)
@@ -85,6 +86,7 @@ directional_shadow_split_3 = 0.26
 directional_shadow_max_distance = 250.0
 
 [node name="VoxelWorld" type="Node3D" parent="."]
+process_mode = 3
 script = ExtResource("1_world")
 player_path = NodePath("../Player")
 
@@ -176,4 +178,46 @@ color = Color(1, 1, 1, 0.75)
 
 [node name="Music" type="AudioStreamPlayer" parent="."]
 script = ExtResource("4_music")
+
+[node name="Splash" type="CanvasLayer" parent="."]
+process_mode = 3
+layer = 128
+script = ExtResource("16_splash")
+
+[node name="Background" type="ColorRect" parent="Splash"]
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.05, 0.06, 0.08, 1)
+
+[node name="Panel" type="VBoxContainer" parent="Splash"]
+process_mode = 3
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -30.0
+offset_right = 200.0
+offset_bottom = 30.0
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="Splash/Panel"]
+process_mode = 3
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 20
+horizontal_alignment = 1
+text = "Generating world..."
+
+[node name="ProgressBar" type="ProgressBar" parent="Splash/Panel"]
+process_mode = 3
+custom_minimum_size = Vector2(400, 24)
+layout_mode = 2
+min_value = 0.0
+max_value = 1.0
+value = 0.0
+show_percentage = true
 

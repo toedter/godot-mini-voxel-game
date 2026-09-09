@@ -16,6 +16,10 @@ extends Node3D
 ## thins out and the peaks across the island rise out of it.
 
 signal world_ready
+## Fires as the initial disc of chunks is generated, before `world_ready`, so a
+## loading screen can drive a progress bar off of it. `total` is the number of
+## chunks queued for the very first disc; `done` counts down as they arrive.
+signal generation_progress(done: int, total: int)
 ## Fires once the tide has settled at a new level, after the distant island has
 ## reached the level it was sent to. The hook a game hangs "the water reached
 ## the mark" on. Nothing has to be repainted for it: the sea plane and the
@@ -191,6 +195,9 @@ var _mutex := Mutex.new()
 ## moves, so walking a few metres costs nothing.
 var _center := Vector2i(0x7fffffff, 0)
 var _spawned := false
+## Size of the very first disc queued in `_ready`, so `generation_progress` has
+## a denominator to report against.
+var _initial_total := 0
 ## Every mushroom light currently in the scene, so the day/night cycle can dim
 ## them all at once.
 var _mushroom_lights: Array[OmniLight3D] = []
@@ -212,6 +219,8 @@ func _ready() -> void:
 	_create_far_terrain()
 	_spawn_player()
 	_update_center(true)
+	_initial_total = _queue.size()
+	generation_progress.emit(0, _initial_total)
 
 
 ## The materials are created on demand because Atmosphere, which pushes the
@@ -733,9 +742,11 @@ func _integrate_results() -> void:
 			continue
 		_chunks[key] = _spawn_chunk(key, res)
 
-	if not _spawned and _jobs.is_empty() and _queue.is_empty():
-		_spawned = true
-		world_ready.emit()
+	if not _spawned:
+		generation_progress.emit(_initial_total - _queue.size() - _jobs.size(), _initial_total)
+		if _jobs.is_empty() and _queue.is_empty():
+			_spawned = true
+			world_ready.emit()
 
 
 func _spawn_chunk(key: Vector2i, res: Dictionary) -> Dictionary:
@@ -927,6 +938,20 @@ func biome_name_at(pos: Vector3) -> String:
 
 func loaded_chunks() -> int:
 	return _chunks.size()
+
+
+## Whether the initial disc of chunks around the spawn point has finished
+## loading, i.e. whether `world_ready` has already fired. A loading screen
+## reads this after connecting its signals, in case generation raced ahead of
+## it and finished before it could listen.
+func is_world_ready() -> bool:
+	return _spawned
+
+
+## Number of chunks queued for the initial disc, for a loading screen's
+## progress bar to use as its maximum.
+func generation_total() -> int:
+	return _initial_total
 
 
 # --------------------------------------------------------------------------
