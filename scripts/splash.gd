@@ -38,6 +38,7 @@ var _xr_camera_cull_mask := 0
 var _xr_root: Node3D
 var _xr_fill_pivot: Node3D
 var _xr_percent_label: Label3D
+var _xr_panel_placed := false
 
 
 func _ready() -> void:
@@ -59,10 +60,14 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if _xr_camera != null and _xr_root != null:
+	# Placed once from the headset's current pose and then left alone, so it
+	# reads as a fixed object in the world rather than something stuck to the
+	# player's view; only the first frame (once tracking has a pose) sets it.
+	if _xr_camera != null and _xr_root != null and not _xr_panel_placed:
 		_xr_root.global_transform = _xr_camera.global_transform.translated_local(
 			Vector3(0.0, 0.0, -xr_panel_distance)
 		)
+		_xr_panel_placed = true
 
 
 func _on_progress(done: int, total: int) -> void:
