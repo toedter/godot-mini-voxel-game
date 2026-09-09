@@ -16,6 +16,7 @@
 [ext_resource type="Script" path="res://scripts/save_game.gd" id="14_save"]
 [ext_resource type="Script" path="res://scripts/sun_dial.gd" id="15_dial"]
 [ext_resource type="Script" path="res://scripts/splash.gd" id="16_splash"]
+[ext_resource type="Texture2D" path="res://resources/splash.jpg" id="17_splash_bg"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_1"]
 sky_top_color = Color(0.25, 0.48, 0.9, 1)
@@ -184,12 +185,14 @@ process_mode = 3
 layer = 128
 script = ExtResource("16_splash")
 
-[node name="Background" type="ColorRect" parent="Splash"]
+[node name="Background" type="TextureRect" parent="Splash"]
 process_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.05, 0.06, 0.08, 1)
+texture = ExtResource("17_splash_bg")
+expand_mode = 1
+stretch_mode = 6
 
 [node name="Panel" type="VBoxContainer" parent="Splash"]
 process_mode = 3
