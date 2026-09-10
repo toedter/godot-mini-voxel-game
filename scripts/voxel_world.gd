@@ -137,6 +137,10 @@ var _tide_target: float = VoxelDefs.SEA_DATUM
 ## further; see FarTerrain.
 @export_range(0.0, 4.0, 0.1) var far_drop: float = 0.5
 @export var player_path: NodePath = ^"../Player"
+## The vault under the drowned ruin, if the island grew one. Used by the debug
+## teleport so it can drop the player straight into the dungeon rather than
+## just at its doorstep.
+@export var interior_path: NodePath = ^"../Vault"
 
 var gen: TerrainGen
 ## True while the player stands in an interior rather than on the island.
@@ -465,8 +469,18 @@ func _input(event: InputEvent) -> void:
 
 ## Debug scaffolding, same family as the tide keys. The player now starts on
 ## the shore beside the drowned ruin, so this is the way back after wandering
-## off across the island rather than the way there.
+## off across the island rather than the way there. Drops straight into the
+## vault when the island grew one and it has finished building, rather than
+## leaving the player to find the archway and walk down themselves.
 func teleport_to_structures() -> void:
+	var p := get_node_or_null(player_path) as Node3D
+	if p == null:
+		return
+	var interior := get_node_or_null(interior_path) as Interior
+	if interior != null and interior.is_built():
+		interior.enter(p)
+		_update_center(true)
+		return
 	if gen == null or gen.structures == null or gen.structures.size() == 0:
 		return
 	var first := gen.structures.all()[0]
@@ -477,9 +491,6 @@ func teleport_to_structures() -> void:
 	var back := Vector2(x, z).normalized() * 6.0
 	x += back.x
 	z += back.y
-	var p := get_node_or_null(player_path) as Node3D
-	if p == null:
-		return
 	p.global_position = Vector3(x, gen.ground_y(x, z) + 2.0, z)
 	_update_center(true)
 
