@@ -48,7 +48,9 @@ func carve(a: Vector3i, b: Vector3i) -> void:
 
 
 ## A hollow chamber: the air volume you give it, wrapped in walls, a floor and
-## a ceiling.
+## a ceiling. The floor and ceiling are their own materials rather than the
+## walls' - a vault reads as built rather than carved when the ground underfoot
+## and the timber overhead are not the same stone the walls are.
 ##
 ## Takes the air rather than the outside of the masonry, because a floor plan
 ## is drawn in walkable rectangles, and because filling a solid block and
@@ -56,7 +58,7 @@ func carve(a: Vector3i, b: Vector3i) -> void:
 ## hundred thousand dictionary writes to leave twenty thousand voxels standing.
 ## Six slabs cost only the masonry.
 func chamber(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
-		mat: int) -> void:
+		wall_mat: int, floor_mat: int, ceil_mat: int) -> void:
 	var lo := Vector3i(mini(air_lo.x, air_hi.x), mini(air_lo.y, air_hi.y),
 		mini(air_lo.z, air_hi.z))
 	var hi := Vector3i(maxi(air_lo.x, air_hi.x), maxi(air_lo.y, air_hi.y),
@@ -64,17 +66,17 @@ func chamber(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
 	# Floor and ceiling run the whole footprint, so the corners come from them
 	# and the four walls only have to reach between.
 	fill(Vector3i(lo.x - wall, lo.y - cap, lo.z - wall),
-		Vector3i(hi.x + wall, lo.y - 1, hi.z + wall), mat)
+		Vector3i(hi.x + wall, lo.y - 1, hi.z + wall), floor_mat)
 	fill(Vector3i(lo.x - wall, hi.y + 1, lo.z - wall),
-		Vector3i(hi.x + wall, hi.y + cap, hi.z + wall), mat)
+		Vector3i(hi.x + wall, hi.y + cap, hi.z + wall), ceil_mat)
 	fill(Vector3i(lo.x - wall, lo.y, lo.z - wall),
-		Vector3i(lo.x - 1, hi.y, hi.z + wall), mat)
+		Vector3i(lo.x - 1, hi.y, hi.z + wall), wall_mat)
 	fill(Vector3i(hi.x + 1, lo.y, lo.z - wall),
-		Vector3i(hi.x + wall, hi.y, hi.z + wall), mat)
+		Vector3i(hi.x + wall, hi.y, hi.z + wall), wall_mat)
 	fill(Vector3i(lo.x, lo.y, lo.z - wall),
-		Vector3i(hi.x, hi.y, lo.z - 1), mat)
+		Vector3i(hi.x, hi.y, lo.z - 1), wall_mat)
 	fill(Vector3i(lo.x, lo.y, hi.z + 1),
-		Vector3i(hi.x, hi.y, hi.z + wall), mat)
+		Vector3i(hi.x, hi.y, hi.z + wall), wall_mat)
 
 
 ## Deterministic per-voxel brightness, so a flat wall still reads as individual
