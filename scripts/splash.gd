@@ -42,8 +42,14 @@ var _xr_panel_placed := false
 
 
 func _ready() -> void:
-	get_tree().paused = true
 	_world = get_node_or_null(world_path) as VoxelWorld
+	# TEMP: see VoxelWorld.debug_start_in_vault - the island is never
+	# streamed in this mode, so there is nothing for a loading screen to wait
+	# on; skip it and drop straight into the vault.
+	if _world != null and _world.debug_start_in_vault:
+		queue_free()
+		return
+	get_tree().paused = true
 	if _world == null:
 		_finish()
 		return

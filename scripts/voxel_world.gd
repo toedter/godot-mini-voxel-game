@@ -141,6 +141,11 @@ var _tide_target: float = VoxelDefs.SEA_DATUM
 ## teleport so it can drop the player straight into the dungeon rather than
 ## just at its doorstep.
 @export var interior_path: NodePath = ^"../Vault"
+## TEMP debug toggle: drop the player straight into the vault on start instead
+## of spawning them on the island, so the interior can be iterated on without
+## walking there (or waiting on the island's chunk disc) every run. Flip back
+## to false, or delete along with `_debug_enter_vault`, once done.
+@export var debug_start_in_vault: bool = true
 
 var gen: TerrainGen
 ## True while the player stands in an interior rather than on the island.
@@ -218,6 +223,14 @@ func _ready() -> void:
 	# Before anything is meshed: chunk jobs read the set from worker threads and
 	# nothing may write to it once they are running.
 	gen.structures = StructureSet.for_island(gen)
+	if debug_start_in_vault:
+		# The island itself is never streamed: no materials, no sea, no far
+		# mesh, no chunk disc, nothing for a loading screen to wait on. Only
+		# the structures above are needed, so the vault knows where its
+		# archway is. Deferred so it runs once every node in the scene
+		# (including the vault, which builds itself in its own _ready) is up.
+		call_deferred("_debug_enter_vault")
+		return
 	_ensure_materials()
 	_create_water()
 	_create_far_terrain()
@@ -225,6 +238,11 @@ func _ready() -> void:
 	_update_center(true)
 	_initial_total = _queue.size()
 	generation_progress.emit(0, _initial_total)
+
+
+## TEMP: see `debug_start_in_vault`.
+func _debug_enter_vault() -> void:
+	teleport_to_structures()
 
 
 ## The materials are created on demand because Atmosphere, which pushes the
@@ -585,6 +603,10 @@ func _dry_spawn_point() -> Vector2:
 
 
 func _process(delta: float) -> void:
+	# TEMP: see `debug_start_in_vault` - the island was never streamed, so
+	# there is nothing here to advance.
+	if debug_start_in_vault:
+		return
 	_advance_tide(delta)
 	_update_center(false)
 	_update_water()
@@ -624,6 +646,10 @@ func _update_lights(delta: float) -> void:
 ## The disc is only reconsidered when the player crosses a chunk boundary, so
 ## walking a few metres costs nothing.
 func _update_center(force: bool) -> void:
+	# TEMP: see `debug_start_in_vault` - the island was never streamed, so
+	# there is no disc to reconsider, forced or not.
+	if debug_start_in_vault:
+		return
 	# Indoors the player is three hundred metres under the island and can see
 	# none of it. Their XZ still moves - an interior is a room standing at the
 	# same coordinates, not a separate world - and following it would re-stream
