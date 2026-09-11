@@ -25,6 +25,11 @@ var _holder: Interactor
 ## Where it goes back to if the player drops it in mid air.
 var _rest_position: Vector3
 var _world: VoxelWorld
+## This item's own collision shape, reused while held to keep it out of
+## walls. Found lazily rather than in `_ready`, since a subclass (Torch)
+## builds its body, and the shape with it, after calling up into this one.
+var _hold_shape: CollisionShape3D
+var _hold_shape_searched := false
 
 
 func _ready() -> void:
@@ -156,8 +161,71 @@ func _physics_process(delta: float) -> void:
 	# Eased rather than snapped, so a held object trails the head slightly and
 	# reads as a thing being carried instead of a decal on the camera.
 	var k: float = clampf(_holder.carry_lerp * delta, 0.0, 1.0)
-	position = position.lerp(_holder.carry_offset, k)
-	quaternion = quaternion.slerp(_holder.carry_rotation(), k)
+	var next_pos := position.lerp(_holder.carry_offset, k)
+	var next_rot := quaternion.slerp(_holder.carry_rotation(), k)
+	position = _clear_of_walls(next_pos, next_rot)
+	quaternion = next_rot
+
+
+## This item's own collision shape (the one built around its body), or null
+## if it has none. A held item is taken off the world layer entirely so it
+## cannot shove the player or steal the aim ray, which also means physics
+## never stops it sliding into a wall on its own; this is what `_clear_of_
+## walls` tests against instead.
+func _hold_collision_shape() -> CollisionShape3D:
+	if _hold_shape_searched:
+		return _hold_shape
+	_hold_shape_searched = true
+	for child in get_children():
+		if child is CollisionShape3D:
+			_hold_shape = child as CollisionShape3D
+			break
+	return _hold_shape
+
+
+## Whether this item's own shape, held at the given local pose, would poke
+## into the world (walls, terrain, the vault shell). Layer only, not the
+## item's own `collision_layer` - that is zeroed out while held, on purpose,
+## so this is the one thing still checking.
+func _overlaps_world(local_pos: Vector3, local_rot: Quaternion) -> bool:
+	var shape_node := _hold_collision_shape()
+	if shape_node == null or shape_node.shape == null or _holder == null:
+		return false
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return false
+	var pose := Transform3D(Basis(local_rot), local_pos) * shape_node.transform
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape_node.shape
+	query.transform = _holder.global_transform * pose
+	query.collision_mask = LAYER_WORLD
+	query.margin = 0.02
+	# The player's own body sits on the world layer too (default physics
+	# layer 1), and the carry pose rides right up against it - without this,
+	# every held item would read as permanently wedged into its own holder.
+	var holder_body := _holder.body()
+	if holder_body != null:
+		query.exclude = [holder_body.get_rid()]
+	return not space.intersect_shape(query, 1).is_empty()
+
+
+## Pulls a carry position back toward the hand until it stops poking into a
+## wall, rather than letting a held object clip straight through one. The
+## hand's own origin is trusted as clear - the player cannot stand close
+## enough to a wall to embed their own head in it - so the search is a
+## straight line from there out to the pose the carry lerp actually wants.
+func _clear_of_walls(local_pos: Vector3, local_rot: Quaternion) -> Vector3:
+	if not _overlaps_world(local_pos, local_rot):
+		return local_pos
+	var lo := 0.0
+	var hi := 1.0
+	for _i in 8:
+		var mid := (lo + hi) * 0.5
+		if _overlaps_world(local_pos * mid, local_rot):
+			hi = mid
+		else:
+			lo = mid
+	return local_pos * lo
 
 
 # --------------------------------------------------------------------------

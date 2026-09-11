@@ -79,6 +79,32 @@ func chamber(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
 		Vector3i(hi.x, hi.y, hi.z + wall), wall_mat)
 
 
+## Rounds a flat ceiling, already built by `chamber`, into a shallow barrel
+## vault across the room's own width (X): the crown lifts `rise` voxels above
+## the flat ceiling on the corridor's centre line and eases back down to it at
+## each wall, on a quarter circle, so the vault reads as an arc rather than a
+## tent. Carves into the ceiling slab only - it needs a `cap` thicker than an
+## ordinary chamber's, so there is still roof standing once the crown is
+## carved out of it, and it touches nothing below the flat ceiling height, so
+## the walls it springs from are exactly the ones `chamber` already built.
+func vault_ceiling(air_lo: Vector3i, air_hi: Vector3i, rise: int) -> void:
+	var lo_x := mini(air_lo.x, air_hi.x)
+	var hi_x := maxi(air_lo.x, air_hi.x)
+	var lo_z := mini(air_lo.z, air_hi.z)
+	var hi_z := maxi(air_lo.z, air_hi.z)
+	var top := maxi(air_lo.y, air_hi.y)
+	var half := float(hi_x - lo_x) * 0.5
+	var cx := float(lo_x + hi_x) * 0.5
+	if half <= 0.0 or rise <= 0:
+		return
+	for x in range(lo_x, hi_x + 1):
+		var t: float = clampf((float(x) - cx) / half, -1.0, 1.0)
+		var h := int(round(sqrt(maxf(0.0, 1.0 - t * t)) * float(rise)))
+		if h <= 0:
+			continue
+		carve(Vector3i(x, top + 1, lo_z), Vector3i(x, top + h, hi_z))
+
+
 ## Deterministic per-voxel brightness, so a flat wall still reads as individual
 ## 10 cm cubes. The world's shader does this per fragment; a room is a static
 ## mesh, so it is baked into the vertex colour instead.

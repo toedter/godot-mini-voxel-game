@@ -39,6 +39,12 @@ const DOOR_TOP := 19 * SCALE
 ## hang off it and share its walls.
 const GALLERY_LO := Vector3i(54 * SCALE, 0, 44 * SCALE)
 const GALLERY_HI := Vector3i(71 * SCALE, HEAD, 87 * SCALE)
+## The gallery's ceiling is vaulted rather than flat: a true semicircle across
+## its own width, so the crown rises exactly half that width above HEAD.
+const GALLERY_RISE := (GALLERY_HI.x - GALLERY_LO.x) / 2
+## The chamber needs a thicker cap than an ordinary one so there is still roof
+## standing once the crown is carved out of it, plus a little to spare.
+const GALLERY_CAP := CAP + GALLERY_RISE + CAP
 ## Where the player arrives, and the only way back to the island.
 const ANTE_LO := Vector3i(40 * SCALE, 0, 91 * SCALE)
 const ANTE_HI := Vector3i(83 * SCALE, HEAD, 126 * SCALE)
@@ -90,6 +96,15 @@ var gate := Vector3.ZERO
 var braziers: Array[Vector3] = []
 ## The plinth in the antechamber, where a torch has been left burning.
 var torch_rest := Vector3.ZERO
+## Sconces mounted on the antechamber's own walls: {pos, yaw}. Deliberately
+## confined to the one chamber that is already "solved" the moment the player
+## arrives - a little warmth at the threshold, not light carried into the
+## puzzle. Everywhere past the gallery door stays exactly as dark as the three
+## braziers were built to matter.
+var wall_torches: Array[Dictionary] = []
+## Barrels and crates standing against the walls: {kind, pos, yaw}. Set
+## dressing only - nothing here is interactive, and nothing here throws light.
+var clutter: Array[Dictionary] = []
 
 
 ## Clear size (m) of a doorway. The gate that fills one is built from this
@@ -109,7 +124,12 @@ func build() -> VoxelRoom:
 	var sandstone := VoxelDefs.SANDSTONE
 	var stone := VoxelDefs.STONE
 	var wood := VoxelDefs.WOOD
-	room.chamber(GALLERY_LO, GALLERY_HI, WALL, CAP, sandstone, stone, wood)
+	# The gallery alone is vaulted rather than flat-capped, so its ceiling is
+	# sandstone brick like the walls rather than the timber every other
+	# chamber is capped with - a barrel-vaulted stone corridor, not a room with
+	# a curved lid nailed on.
+	room.chamber(GALLERY_LO, GALLERY_HI, WALL, GALLERY_CAP, sandstone, stone, sandstone)
+	room.vault_ceiling(GALLERY_LO, GALLERY_HI, GALLERY_RISE)
 	room.chamber(ANTE_LO, ANTE_HI, WALL, CAP, sandstone, stone, wood)
 	room.chamber(CISTERN_LO, CISTERN_HI, WALL, CAP, sandstone, stone, wood)
 	room.chamber(RELIC_LO, RELIC_HI, WALL, CAP, sandstone, stone, wood)
@@ -356,3 +376,69 @@ func _anchors() -> void:
 		Vector3(float(104 * SCALE) * VS, 0.0, float(54 * SCALE) * VS),
 		_laby_cell_center(_laby_center_cell()),
 	]
+	wall_torches = _wall_torch_anchors()
+	clutter = _clutter_anchors()
+
+
+## A wall-mounted sconce, in metres: low enough to read as hand height, and
+## the yaw that turns its bracket away from the wall to face into the room.
+## `WallTorch` builds its arm and flame along its own -Z, so the direction a
+## yaw of 0 projects is world -Z; matching that to an arbitrary `facing`
+## takes the negative of both its components, not just the Z one - the sign
+## this previously dropped was what had every sconce built facing back into
+## the masonry it is mounted on rather than out into the room.
+func _wall_torch(x: int, z: int, facing: Vector3) -> Dictionary:
+	return {
+		"pos": Vector3(float(x) * VS, 1.6, float(z) * VS),
+		"yaw": atan2(-facing.x, -facing.z),
+	}
+
+
+## Sconces for the antechamber alone, two pairs facing each other across the
+## room: one flanking the way in from the surface, one either side of the
+## plinth. The one chamber the player is never in the dark in reads as lit by
+## more than the torch they are about to carry through the rest of the vault.
+func _wall_torch_anchors() -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	var near_entry := ANTE_HI.z - 12 * SCALE
+	var near_plinth := ANTE_LO.z + 10 * SCALE
+	# The low wall's inner face sits exactly at its own coordinate; the high
+	# wall's is one voxel past its own, since `chamber` fills that wall
+	# starting at hi + 1 rather than at hi itself.
+	list.append(_wall_torch(ANTE_LO.x, near_entry, Vector3.RIGHT))
+	list.append(_wall_torch(ANTE_HI.x + 1, near_entry, Vector3.LEFT))
+	list.append(_wall_torch(ANTE_LO.x, near_plinth, Vector3.RIGHT))
+	list.append(_wall_torch(ANTE_HI.x + 1, near_plinth, Vector3.LEFT))
+	return list
+
+
+## A barrel or crate standing on the floor, in metres. `x1`/`z1` are the
+## plan's own unscaled units, exactly like the furniture in `_furnish`, so a
+## piece of clutter can be placed by eye against the room it is dressing
+## rather than against the doubled numbers `SCALE` turns them into.
+func _clutter(kind: String, x1: int, z1: int, yaw: float = 0.0) -> Dictionary:
+	return {
+		"kind": kind,
+		"pos": Vector3(float(x1 * SCALE) * VS, 0.0, float(z1 * SCALE) * VS),
+		"yaw": yaw,
+	}
+
+
+## Barrels and crates: nothing here is a puzzle piece, only the cargo a vault
+## this size would actually have been stocked with, standing clear of the
+## doorways and of the furniture `_furnish` already built.
+func _clutter_anchors() -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	# Antechamber: flanking the way in, and again by the plinth.
+	list.append(_clutter("barrel", 48, 122))
+	list.append(_clutter("crate", 74, 122, 0.3))
+	list.append(_clutter("crate", 52, 96, -0.2))
+	list.append(_clutter("barrel", 72, 96))
+	# The gallery spine, the same corridor clutter reads as everywhere else.
+	list.append(_clutter("barrel", 56, 50))
+	list.append(_clutter("crate", 69, 80, 0.4))
+	# One more just inside where each side chamber's own door lets onto the
+	# gallery.
+	list.append(_clutter("barrel", 48, 63))
+	list.append(_clutter("crate", 81, 63, -0.3))
+	return list

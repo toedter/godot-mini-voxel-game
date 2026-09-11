@@ -165,6 +165,29 @@ func _build_props() -> void:
 	torch.position = _plan.torch_rest
 	add_child(torch)
 
+	# Fixed light and set dressing. Neither is savable state - a sconce is
+	# always burning and a barrel never moves - so both are just built fresh
+	# from the plan's anchors every time the vault is.
+	for i in _plan.wall_torches.size():
+		var anchor: Dictionary = _plan.wall_torches[i]
+		var sconce := WallTorch.new()
+		sconce.name = "VaultWallTorch%d" % (i + 1)
+		sconce.position = anchor["pos"]
+		sconce.rotation.y = anchor["yaw"]
+		add_child(sconce)
+
+	for i in _plan.clutter.size():
+		var item: Dictionary = _plan.clutter[i]
+		var prop: Node3D
+		if item["kind"] == "barrel":
+			prop = Barrel.new()
+		else:
+			prop = Crate.new()
+		prop.name = "VaultClutter%d" % (i + 1)
+		prop.position = item["pos"]
+		prop.rotation.y = item["yaw"]
+		add_child(prop)
+
 
 ## The one rule of the vault. Two braziers raise the gate that stands between
 ## the gallery and the inner vault; the third, which is behind that gate, lifts
