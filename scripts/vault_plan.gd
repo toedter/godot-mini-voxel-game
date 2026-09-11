@@ -120,20 +120,22 @@ func build() -> VoxelRoom:
 	var room := VoxelRoom.new()
 	# Walls keep the sandstone the ruin above is built from; the floor and
 	# ceiling are their own materials, so a chamber reads as built - flagstones
-	# underfoot, timber overhead - rather than as a stone box.
+	# underfoot, timber overhead - rather than as a stone box. The floor's own
+	# stone is darker and colder than the general-purpose `STONE` the
+	# furniture in `_furnish` is still cut from.
 	var sandstone := VoxelDefs.SANDSTONE
-	var stone := VoxelDefs.STONE
+	var floor_stone := VoxelDefs.FLOOR_STONE
 	var wood := VoxelDefs.WOOD
 	# The gallery alone is vaulted rather than flat-capped, so its ceiling is
 	# sandstone brick like the walls rather than the timber every other
 	# chamber is capped with - a barrel-vaulted stone corridor, not a room with
 	# a curved lid nailed on.
-	room.chamber(GALLERY_LO, GALLERY_HI, WALL, GALLERY_CAP, sandstone, stone, sandstone)
+	room.chamber(GALLERY_LO, GALLERY_HI, WALL, GALLERY_CAP, sandstone, floor_stone, sandstone)
 	room.vault_ceiling(GALLERY_LO, GALLERY_HI, GALLERY_RISE)
-	room.chamber(ANTE_LO, ANTE_HI, WALL, CAP, sandstone, stone, wood)
-	room.chamber(CISTERN_LO, CISTERN_HI, WALL, CAP, sandstone, stone, wood)
-	room.chamber(RELIC_LO, RELIC_HI, WALL, CAP, sandstone, stone, wood)
-	room.chamber(INNER_LO, INNER_HI, WALL, CAP, sandstone, stone, wood)
+	room.chamber(ANTE_LO, ANTE_HI, WALL, CAP, sandstone, floor_stone, wood)
+	room.chamber(CISTERN_LO, CISTERN_HI, WALL, CAP, sandstone, floor_stone, wood)
+	room.chamber(RELIC_LO, RELIC_HI, WALL, CAP, sandstone, floor_stone, wood)
+	room.chamber(INNER_LO, INNER_HI, WALL, CAP, sandstone, floor_stone, wood)
 	_furnish(room)
 	_build_labyrinth(room)
 	# Cut last, so a maze wall or a piece of furniture that lands on a doorway

@@ -52,6 +52,26 @@ const ICE := 15
 ## with it the crown has a lit top and a dark underside from any angle, which is
 ## most of what makes a voxel tree look like foliage rather than like a shape.
 const LEAF_DARK := 16
+## The seam between two blocks of coursed masonry. Warm to match the
+## sandstone wall it textures. Only ever appears baked into an interior's own
+## static mesh - never part of the streamed terrain - so it needs no
+## subsurface or collision entry.
+const MORTAR := 29
+## A vault floor's own coursed stone, dark rather than the general-purpose
+## `STONE` furniture is still cut from, plus its own darker mortar, so a
+## floor reads as its own, colder material next to the warm sandstone walls
+## it sits between.
+const FLOOR_STONE := 30
+const FLOOR_MORTAR := 31
+## Tonal siblings of `SANDSTONE` and `FLOOR_STONE` that `VoxelRoom.mason` and
+## `mason_flagstone` pick between one whole stone at a time, so a course or a
+## flagstone floor is quarried from several honestly different-coloured rocks
+## rather than one swatch stamped over and over.
+const SANDSTONE_LIGHT := 32
+const SANDSTONE_DARK := 33
+const SANDSTONE_WARM := 34
+const FLOOR_STONE_LIGHT := 35
+const FLOOR_STONE_DARK := 36
 
 ## Mushroom species. Each one is a cap colour paired with the bioluminescent
 ## colour of its gills (which is also the colour of the light it throws). The
@@ -110,6 +130,14 @@ const COLORS := {
 	SEABED: Color(0.545, 0.520, 0.430),
 	SNOW: Color(0.930, 0.950, 0.980),
 	ICE: Color(0.735, 0.855, 0.925),
+	MORTAR: Color(0.195, 0.170, 0.145),
+	FLOOR_STONE: Color(0.300, 0.300, 0.310),
+	FLOOR_MORTAR: Color(0.150, 0.148, 0.155),
+	SANDSTONE_LIGHT: Color(0.760, 0.660, 0.470),
+	SANDSTONE_DARK: Color(0.560, 0.460, 0.300),
+	SANDSTONE_WARM: Color(0.630, 0.430, 0.255),
+	FLOOR_STONE_LIGHT: Color(0.380, 0.375, 0.385),
+	FLOOR_STONE_DARK: Color(0.225, 0.225, 0.235),
 }
 
 ## Per-material strength of the random per-voxel brightness variation.
@@ -143,6 +171,14 @@ const TINT := {
 	SEABED: 0.20,
 	SNOW: 0.09,
 	ICE: 0.10,
+	MORTAR: 0.20,
+	FLOOR_STONE: 0.16,
+	FLOOR_MORTAR: 0.16,
+	SANDSTONE_LIGHT: 0.18,
+	SANDSTONE_DARK: 0.18,
+	SANDSTONE_WARM: 0.18,
+	FLOOR_STONE_LIGHT: 0.16,
+	FLOOR_STONE_DARK: 0.16,
 }
 
 ## Materials drawn with the glow shader, and how brightly each one lights up
