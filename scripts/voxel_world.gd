@@ -145,7 +145,7 @@ var _tide_target: float = VoxelDefs.SEA_DATUM
 ## of spawning them on the island, so the interior can be iterated on without
 ## walking there (or waiting on the island's chunk disc) every run. Flip back
 ## to false, or delete along with `_debug_enter_vault`, once done.
-@export var debug_start_in_vault: bool = true
+@export var debug_start_in_vault: bool = false
 
 var gen: TerrainGen
 ## True while the player stands in an interior rather than on the island.
