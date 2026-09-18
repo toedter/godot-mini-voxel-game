@@ -78,14 +78,14 @@ func chamber(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
 	fill(Vector3i(lo.x, lo.y, hi.z + 1),
 		Vector3i(hi.x, hi.y, hi.z + wall), wall_mat)
 
-	# Texture the two surfaces a player actually reads up close - the walls at
-	# eye height, the floor underfoot - into individual stones of their own.
-	# The ceiling is left as poured; nobody stops to look at masonry overhead
-	# the way they do at the walls either side of them or the ground they walk
-	# on. The wall is coursed ashlar quarried from several tones of the same
-	# sandstone; the floor is crazy-paved flagstone in its own colder greys,
-	# so the two still read as different masonry up close rather than the
-	# same texture recoloured.
+	# Texture the surfaces a player actually reads - the walls at eye height,
+	# the floor underfoot - into individual stones of their own. The ceiling is
+	# left to `plank_ceiling`, which has to run after a chamber that is vaulted
+	# rather than flat-capped has had its arc carved, and so cannot be done
+	# from here. The wall is coursed ashlar quarried from several tones of the
+	# same pale brick; the floor is crazy-paved flagstone in its own colder
+	# greys, so the two still read as different masonry up close rather than
+	# the same texture recoloured.
 	var mortar := VoxelDefs.MORTAR
 	var floor_mortar := VoxelDefs.FLOOR_MORTAR
 	var wall_stones := _family(wall_mat, _WALL_FAMILY)
@@ -95,20 +95,37 @@ func chamber(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
 	var wall_x := hi.x - lo.x + 1
 	mason(Vector3i(lo.x - 1, lo.y, lo.z - wall), Vector3i(0, 1, 0),
 		Vector3i(0, 0, 1), Vector3i(1, 0, 0), wy, wall_z, wall_stones, mortar,
-		3, 4, 4, 7, _face_seed(lo, 0))
+		3, 4, 5, 9, _face_seed(lo, 0))
 	mason(Vector3i(hi.x + 1, lo.y, lo.z - wall), Vector3i(0, 1, 0),
 		Vector3i(0, 0, 1), Vector3i(-1, 0, 0), wy, wall_z, wall_stones, mortar,
-		3, 4, 4, 7, _face_seed(lo, 1))
+		3, 4, 5, 9, _face_seed(lo, 1))
 	mason(Vector3i(lo.x, lo.y, lo.z - 1), Vector3i(0, 1, 0),
 		Vector3i(1, 0, 0), Vector3i(0, 0, 1), wy, wall_x, wall_stones, mortar,
-		3, 4, 4, 7, _face_seed(lo, 2))
+		3, 4, 5, 9, _face_seed(lo, 2))
 	mason(Vector3i(lo.x, lo.y, hi.z + 1), Vector3i(0, 1, 0),
 		Vector3i(1, 0, 0), Vector3i(0, 0, -1), wy, wall_x, wall_stones, mortar,
-		3, 4, 4, 7, _face_seed(lo, 3))
+		3, 4, 5, 9, _face_seed(lo, 3))
 	mason_flagstone(Vector3i(lo.x - wall, lo.y - 1, lo.z - wall),
 		Vector3i(1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 1, 0),
 		wall_x + wall * 2, wall_z, floor_stones, floor_mortar, 7,
 		_face_seed(lo, 4))
+	# And dither every joint that has just been cut, so a seam reads as a
+	# groove with a soft shoulder rather than as a one-voxel step.
+	soften_joints(Vector3i(lo.x - 1, lo.y, lo.z - wall), Vector3i(0, 1, 0),
+		Vector3i(0, 0, 1), wy, wall_z, mortar, VoxelDefs.MORTAR_EDGE, 2,
+		_face_seed(lo, 0))
+	soften_joints(Vector3i(hi.x + 1, lo.y, lo.z - wall), Vector3i(0, 1, 0),
+		Vector3i(0, 0, 1), wy, wall_z, mortar, VoxelDefs.MORTAR_EDGE, 2,
+		_face_seed(lo, 1))
+	soften_joints(Vector3i(lo.x, lo.y, lo.z - 1), Vector3i(0, 1, 0),
+		Vector3i(1, 0, 0), wy, wall_x, mortar, VoxelDefs.MORTAR_EDGE, 2,
+		_face_seed(lo, 2))
+	soften_joints(Vector3i(lo.x, lo.y, hi.z + 1), Vector3i(0, 1, 0),
+		Vector3i(1, 0, 0), wy, wall_x, mortar, VoxelDefs.MORTAR_EDGE, 2,
+		_face_seed(lo, 3))
+	soften_joints(Vector3i(lo.x - wall, lo.y - 1, lo.z - wall),
+		Vector3i(1, 0, 0), Vector3i(0, 0, 1), wall_x + wall * 2, wall_z,
+		floor_mortar, VoxelDefs.FLOOR_MORTAR_EDGE, 3, _face_seed(lo, 4))
 
 
 ## Small, deliberately hand-picked families of honest tonal siblings for the
@@ -120,10 +137,16 @@ func chamber(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
 const _WALL_FAMILY := {
 	VoxelDefs.SANDSTONE: [VoxelDefs.SANDSTONE, VoxelDefs.SANDSTONE_LIGHT,
 		VoxelDefs.SANDSTONE_DARK, VoxelDefs.SANDSTONE_WARM],
+	VoxelDefs.BRICK: [VoxelDefs.BRICK, VoxelDefs.BRICK_LIGHT,
+		VoxelDefs.BRICK_DARK, VoxelDefs.BRICK_WARM],
 }
 const _FLOOR_FAMILY := {
 	VoxelDefs.FLOOR_STONE: [VoxelDefs.FLOOR_STONE, VoxelDefs.FLOOR_STONE_LIGHT,
-		VoxelDefs.FLOOR_STONE_DARK],
+		VoxelDefs.FLOOR_STONE_DARK, VoxelDefs.FLOOR_STONE_PALE],
+}
+const _CEIL_FAMILY := {
+	VoxelDefs.WOOD: [VoxelDefs.WOOD, VoxelDefs.WOOD_LIGHT,
+		VoxelDefs.WOOD_DARK],
 }
 
 
@@ -150,6 +173,11 @@ func _face_seed(lo: Vector3i, face: int) -> int:
 ## a single voxel along the outward normal `n`, so the surface catches light
 ## as unevenly stacked stone rather than a flat, painted slab.
 ##
+## No stone is actually a rectangle. The coursing only decides the cell each
+## stone is set into; the stone itself is laid a voxel over or under each of
+## that cell's four edges and has a corner knocked off, so the joints between
+## stones wander instead of ruling straight lines across the wall.
+##
 ## Every stone is separated from its neighbours by a one-voxel groove of
 ## `mortar_mat` - no brighter rim around it; the tonal variety between
 ## neighbouring stones is what keeps the coursing from reading as a grid, not
@@ -166,81 +194,135 @@ func mason(origin: Vector3i, u: Vector3i, v: Vector3i, n: Vector3i,
 		u_len: int, v_len: int, mat_variants: Array, mortar_mat: int,
 		course_min: int, course_max: int, block_min: int, block_max: int,
 		salt: int) -> void:
+	if u_len <= 0 or v_len <= 0:
+		return
+	# The joints first, as a bed of mortar over the whole face: every stone is
+	# then laid into it, and whatever is left showing between them is the
+	# joint. Drawing it this way is what lets a stone be any shape at all -
+	# the mortar is not a line that has to be drawn around the stone, it is
+	# simply the wall wherever no stone was set.
+	for pu in range(u_len):
+		for pv in range(v_len):
+			_v[origin + u * pu + v * pv] = mortar_mat
+
 	var uu := 0
 	var course := 0
 	while uu < u_len:
-		var ch := course_min + int(TerrainGen.hash2i(course, salt, 0x7a11) \
+		var ch := course_min + int(TerrainGen.hash2i(course, salt, 0x7a11)
 			% (course_max - course_min + 1))
 		var u_hi := mini(uu + ch, u_len)
 		# Every other course starts half a stone further along, the way a
 		# running bond staggers its joints so two courses never stack one
-		# seam directly over another.
-		var phase := int(TerrainGen.hash2i(course, salt, 0x2eed) \
+		# perpend directly over another.
+		var phase := int(TerrainGen.hash2i(course, salt, 0x2eed)
 			% (block_min + block_max)) if course % 2 == 1 else 0
 		var vv := -phase
 		var block := 0
 		while vv < v_len:
 			var bw := block_min + int(TerrainGen.hash2i(course * 733 + block,
 				salt, 0x8a17) % (block_max - block_min + 1))
-			var v_next := vv + bw
-			var v_lo := maxi(vv, 0)
-			var v_hi := mini(v_next, v_len)
-			if v_hi > v_lo:
-				var roll := TerrainGen.hash2i(course * 977 + block, salt,
-					0x51a5) % 20
-				var variant: int = mat_variants[TerrainGen.hash2i(
-					course * 613 + block, salt, 0x3c11) % mat_variants.size()]
-				for pu in range(uu, u_hi):
-					for pv in range(v_lo, v_hi):
-						var p := origin + u * pu + v * pv
-						if roll == 0:
-							# Recessed: bare the layer already standing behind.
-							_v.erase(p)
-							continue
-						_v[p] = variant
-						if roll == 1:
-							# Proud: the whole stone stands one voxel further
-							# out than its neighbours.
-							_v[p + n] = variant
-			# The one-voxel seam separating this stone from the next.
-			if v_next >= 0 and v_next < v_len:
-				for pu in range(uu, u_hi):
-					_v[origin + u * pu + v * v_next] = mortar_mat
-			vv = v_next + 1
+			_stone(origin, u, v, n, u_len, v_len, uu, u_hi - 1, vv,
+				vv + bw - 1, course, block, mat_variants, salt)
+			# One voxel of the mortar bed is left showing between this stone
+			# and the next, before the next one starts.
+			vv += bw + 1
 			block += 1
-		# The seam between this course and the next.
-		if u_hi < u_len:
-			for pv in range(v_len):
-				_v[origin + u * u_hi + v * pv] = mortar_mat
-			uu = u_hi + 1
-		else:
-			uu = u_hi
+		uu = u_hi + 1
 		course += 1
 
 
-## Textures the floor's already-solid top face into an irregular flagstone
-## floor - a crazy-paving of odd polygons rather than a grid of rectangles,
-## which is what makes hand-fitted floor stone look older and rougher than a
-## coursed wall. Scatters a seed point into every `cell`-voxel square of the
-## face, nudged to a random spot within its own square, and gives every voxel
-## to whichever seed sits nearest it - a jittered Voronoi diagram, the cheap
-## way to grow organic, irregularly-sized polygons from a regular grid
-## without ever having to store or walk an edge list. A voxel roughly as
-## close to the second-nearest seed as to its own is left as `mortar_mat`,
-## which is what turns the cell boundaries into a seam instead of a sharp
-## line. Each stone then gets its own colour from `mat_variants` and its own
-## chance to sit one voxel proud or recessed, exactly as `mason` gives a wall.
+## Sets one stone into the bed of mortar `mason` has laid, within the cell the
+## coursing gave it. No stone is actually the rectangle of that cell: each of
+## its four edges is pushed out into the joint or pulled back off it by a
+## voxel of its own, and a corner or two is knocked off, so the stone is a
+## rough quadrilateral with chipped ends - which is the whole difference
+## between hand-cut stone and printed brick, and the reason the joints between
+## them wander instead of ruling straight lines across the wall. The edges are
+## moved a whole stone at a time rather than voxel by voxel: jittering every
+## voxel of an edge separately does not read as a rough stone, it reads as
+## static.
+func _stone(origin: Vector3i, u: Vector3i, v: Vector3i, n: Vector3i,
+		u_len: int, v_len: int, u0: int, u1: int, v0: int, v1: int,
+		course: int, block: int, mat_variants: Array, salt: int) -> void:
+	var key := course * 4093 + block
+	var h := TerrainGen.hash2i(key, salt, 0x9e37)
+	# -1 pulls the edge back off the joint, +1 pushes it into the joint and up
+	# against the neighbouring stone; most edges stay where the coursing put
+	# them.
+	var a_u := maxi(u0 + _edge(h, 0), 0)
+	var b_u := mini(u1 - _edge(h, 1), u_len - 1)
+	var a_v := maxi(v0 + _edge(h, 2), 0)
+	var b_v := mini(v1 - _edge(h, 3), v_len - 1)
+	if a_u > b_u or a_v > b_v:
+		return
+	# The corner to knock a voxel off, if this stone is one of the third or so
+	# that have lost one.
+	var chip := (h >> 9) % 12
+	var roll := TerrainGen.hash2i(key, salt, 0x51a5) % 20
+	var variant: int = mat_variants[TerrainGen.hash2i(key, salt, 0x3c11)
+		% mat_variants.size()]
+	for pu in range(a_u, b_u + 1):
+		for pv in range(a_v, b_v + 1):
+			var corner := (0 if pu == a_u else 1) * 2 + (0 if pv == a_v else 1)
+			var on_edge := (pu == a_u or pu == b_u) and (pv == a_v or pv == b_v)
+			if chip < 4 and on_edge and corner == chip:
+				continue
+			var p := origin + u * pu + v * pv
+			if roll == 0:
+				# Recessed: bare the layer already standing behind.
+				_v.erase(p)
+				continue
+			_v[p] = variant
+			if roll == 1:
+				# Proud: the whole stone stands one voxel further out than
+				# its neighbours.
+				_v[p + n] = variant
+
+
+## One edge's own displacement, in voxels, from the four packed into a
+## stone's hash.
+func _edge(h: int, i: int) -> int:
+	var q := (h >> (i * 3)) % 8
+	if q == 0:
+		return -1
+	if q == 1:
+		return 1
+	return 0
+
+
+## Textures the floor's already-solid top face into a flagstone floor: stones
+## of their own irregular sizes, each one ringed all the way round by a groove
+## of dark `mortar_mat`, which is what makes a floor read as paving that was
+## bedded and grouted rather than as a wall laid on its back. Scatters a seed
+## point into every `cell`-voxel square of the face, nudged to a random spot
+## within its own square, and gives every voxel to whichever seed sits nearest
+## it - a jittered Voronoi diagram, the cheap way to grow organic,
+## irregularly-sized polygons from a regular grid without ever having to store
+## or walk an edge list.
+##
+## The grout is then found rather than guessed at: a voxel whose neighbour
+## belongs to a different stone is grout, so the border is continuous and
+## exactly one voxel wide everywhere, however irregular the stone it runs
+## around. Only the voxel on the lower-numbered side of a boundary takes it,
+## or every joint would come out two voxels wide and the floor would read as
+## more mortar than stone. Each stone then gets its own colour from
+## `mat_variants` and its own chance to sit one voxel proud or recessed,
+## exactly as `mason` gives a wall.
 func mason_flagstone(origin: Vector3i, u: Vector3i, v: Vector3i, n: Vector3i,
 		u_len: int, v_len: int, mat_variants: Array, mortar_mat: int,
 		cell: int, salt: int) -> void:
-	const SEAM := 0.4  # voxels of slack before a boundary reads as mortar.
+	if u_len <= 0 or v_len <= 0:
+		return
+	# Which stone owns each voxel of the face, worked out once so the grout
+	# pass below can simply compare neighbours.
+	var owner := PackedInt32Array()
+	owner.resize(u_len * v_len)
 	for pu in range(u_len):
+		var cu := int(floor(float(pu) / cell))
 		for pv in range(v_len):
-			var cu := int(floor(float(pu) / cell))
 			var cv := int(floor(float(pv) / cell))
 			var best_d := INF
 			var best_id := 0
-			var second_d := INF
 			for du in range(-1, 2):
 				for dv in range(-1, 2):
 					var gcu := cu + du
@@ -249,29 +331,160 @@ func mason_flagstone(origin: Vector3i, u: Vector3i, v: Vector3i, n: Vector3i,
 						salt ^ 0x1234) % 1000) / 1000.0
 					var jy := float(TerrainGen.hash2i(gcu, gcv,
 						salt ^ 0x5678) % 1000) / 1000.0
-					var sx := (float(gcu) + 0.15 + jx * 0.7) * cell
-					var sy := (float(gcv) + 0.15 + jy * 0.7) * cell
+					var sx := (float(gcu) + 0.2 + jx * 0.6) * cell
+					var sy := (float(gcv) + 0.2 + jy * 0.6) * cell
 					var dx := float(pu) - sx
 					var dy := float(pv) - sy
 					var d := dx * dx + dy * dy
 					if d < best_d:
-						second_d = best_d
 						best_d = d
 						best_id = TerrainGen.hash2i(gcu, gcv, salt ^ 0x9abc)
-					elif d < second_d:
-						second_d = d
+			owner[pu * v_len + pv] = best_id
+	for pu in range(u_len):
+		for pv in range(v_len):
+			var id := owner[pu * v_len + pv]
 			var p := origin + u * pu + v * pv
-			if sqrt(second_d) - sqrt(best_d) < SEAM:
+			var grout := false
+			for d2: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0),
+					Vector2i(0, 1), Vector2i(0, -1)]:
+				var qu := pu + d2.x
+				var qv := pv + d2.y
+				if qu < 0 or qu >= u_len or qv < 0 or qv >= v_len:
+					continue
+				var other := owner[qu * v_len + qv]
+				if other > id:
+					grout = true
+					break
+			if grout:
 				_v[p] = mortar_mat
 				continue
-			var variant: int = mat_variants[best_id % mat_variants.size()]
-			var roll := best_id % 20
+			var variant: int = mat_variants[id % mat_variants.size()]
+			var roll := id % 20
 			if roll == 0:
 				_v.erase(p)
 			else:
 				_v[p] = variant
 				if roll == 1:
 					_v[p + n] = variant
+
+
+## Dithers the joints of a face `mason` or `mason_flagstone` has just laid, by
+## giving one stone voxel in `one_in` of those that border a joint a half-tone
+## standing between the stone and the mortar beside them. Nothing here moves a
+## stone or a seam, and the mortar itself is left alone - breaking up a groove
+## that is only one voxel wide would cost the joint the continuous dark line
+## that is the whole point of it. What is softened is the shoulder on the
+## stone side, which turns a single hard step into two smaller ones, and that
+## is as close to an anti-aliased edge as 10 cm voxels can come. A floor wants
+## a thinner fringe than a wall: its stones are smaller, and a shoulder that
+## is a fair share of the stone reads as dirt rather than as an edge.
+##
+## Every change is worked out against the face as it was found and applied
+## afterwards, so a voxel that has just been softened never counts as mortar
+## for its neighbour and the dithering cannot spread inward off the joint.
+func soften_joints(origin: Vector3i, u: Vector3i, v: Vector3i,
+		u_len: int, v_len: int, mortar_mat: int, edge_mat: int,
+		one_in: int, salt: int) -> void:
+	var changed := {}
+	for pu in range(u_len):
+		for pv in range(v_len):
+			var p := origin + u * pu + v * pv
+			if not _v.has(p):
+				continue
+			var here: int = _v[p]
+			if here == mortar_mat or here == edge_mat:
+				continue
+			var on_joint := false
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0),
+					Vector2i(0, 1), Vector2i(0, -1)]:
+				var qu := pu + d.x
+				var qv := pv + d.y
+				if qu < 0 or qu >= u_len or qv < 0 or qv >= v_len:
+					continue
+				var q := origin + u * qu + v * qv
+				if _v.has(q) and _v[q] == mortar_mat:
+					on_joint = true
+					break
+			if not on_joint:
+				continue
+			if TerrainGen.hash2i(pu, pv, salt ^ 0x50f7) % one_in == 0:
+				changed[p] = edge_mat
+	for p: Vector3i in changed:
+		_v[p] = changed[p]
+
+
+## Textures the underside of a ceiling already built by `chamber` into a
+## boarded timber one: planks running the length of the room (Z) in their own
+## tones, each separated from its neighbour by a dark seam, crossed every so
+## often by a joist. Works off whatever is standing rather than off a flat
+## height, so the same call boards a barrel vault carved by `vault_ceiling`
+## as readily as an ordinary flat cap - each column of the footprint is walked
+## upward from the air until the first solid voxel, and that one voxel, the
+## only one anybody can see from below, is what gets painted.
+##
+## Takes the same air volume, wall and cap `chamber` was given, so a ceiling
+## is boarded by repeating the call that built it rather than by working out
+## the slab's own bounds again.
+func plank_ceiling(air_lo: Vector3i, air_hi: Vector3i, wall: int, cap: int,
+		ceil_mat: int, salt: int) -> void:
+	# A board is 40-70 cm across and a joist crosses every 2.4 m, which at
+	# 10 cm voxels is timber a carpenter could actually have carried in.
+	const BOARD_MIN := 4
+	const BOARD_MAX := 7
+	const JOIST_EVERY := 24
+	const JOIST_WIDE := 2
+	var board_mats := _family(ceil_mat, _CEIL_FAMILY)
+	var seam_mat := VoxelDefs.BEAM
+	var lo := Vector3i(mini(air_lo.x, air_hi.x), mini(air_lo.y, air_hi.y),
+		mini(air_lo.z, air_hi.z))
+	var hi := Vector3i(maxi(air_lo.x, air_hi.x), maxi(air_lo.y, air_hi.y),
+		maxi(air_lo.z, air_hi.z))
+	var x0 := lo.x - wall
+	var z0 := lo.z - wall
+	var x_len := hi.x - lo.x + 1 + wall * 2
+	var z_len := hi.z - lo.z + 1 + wall * 2
+	# Lay the boards out across X once: every column of the ceiling at the
+	# same x belongs to the same plank, so its width, its tone and the seam
+	# that ends it are decided here rather than per voxel.
+	var board_of := PackedInt32Array()
+	board_of.resize(x_len)
+	var xi := 0
+	var board := 0
+	while xi < x_len:
+		var bw := BOARD_MIN + int(TerrainGen.hash2i(board, salt, 0x4b0a)
+			% (BOARD_MAX - BOARD_MIN + 1))
+		for k in range(xi, mini(xi + bw, x_len)):
+			board_of[k] = board
+		# The seam is the plank's last voxel, marked as belonging to no board.
+		var seam := xi + bw
+		if seam < x_len:
+			board_of[seam] = -1
+		xi = seam + 1
+		board += 1
+	for dx in range(x_len):
+		var b := board_of[dx]
+		var mat: int = seam_mat
+		if b >= 0:
+			mat = board_mats[TerrainGen.hash2i(b, salt, 0x1f0d)
+				% board_mats.size()]
+		for dz in range(z_len):
+			# Joists cross the boards at a fixed spacing, and the butt joint
+			# where one plank ends and the next begins is drawn as a seam of
+			# its own so the boarding does not read as endlessly long timber.
+			var m := mat
+			if dz % JOIST_EVERY < JOIST_WIDE:
+				m = seam_mat
+			elif b >= 0 and (dz + b * 11) % (JOIST_EVERY * 2) == 0:
+				m = seam_mat
+			var p := Vector3i(x0 + dx, hi.y + 1, z0 + dz)
+			var found := false
+			for y in range(hi.y + 1, hi.y + cap + 1):
+				p.y = y
+				if _v.has(p):
+					found = true
+					break
+			if found:
+				_v[p] = m
 
 
 ## Rounds a flat ceiling, already built by `chamber`, into a shallow barrel

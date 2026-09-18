@@ -54,27 +54,17 @@ const CISTERN_HI := Vector3i(50 * SCALE, HEAD, 85 * SCALE)
 ## Niches cut into the far wall, and a bench under them.
 const RELIC_LO := Vector3i(75 * SCALE, 0, 50 * SCALE)
 const RELIC_HI := Vector3i(110 * SCALE, HEAD, 85 * SCALE)
-## Behind the gate: whatever the vault was built to hold - a labyrinth,
-## its size following from a comfortable corridor width and a wall thickness
-## rather than the other way round, cell walls built the way any text-book
-## maze generator builds them: a grid of cells, each with its own four walls, torn down one
-## at a time between neighbours until every cell is reachable. Its near edge
-## is where the old single room's was, so the door cut into the gallery wall
-## still opens onto it exactly, and it is centred on the gallery's own axis
-## rather than the gallery's footprint, so the door lines up with the middle
-## of the maze rather than with whichever cell the maze happens to leave open
-## there.
-const LABY_CELL_M := 2.0
-const LABY_WALL_M := 0.5
-## Odd, so the maze has one cell dead in the middle rather than a crossroads
-## of four - somewhere to put the last brazier that is actually the centre.
-const LABY_CELLS := 7
-const LABY_CELL := int(LABY_CELL_M / VS)
-const LABY_WALL := int(LABY_WALL_M / VS)
-const LABY_SIZE := LABY_CELLS * LABY_CELL + (LABY_CELLS - 1) * LABY_WALL
+## Behind the gate: whatever the vault was built to hold - an inner sanctum,
+## a single square chamber on the gallery's own axis with the last brazier
+## standing in the middle of it. Its near edge is where the gallery's far wall
+## is, so the door cut between them opens straight onto it, and it is centred
+## on the gallery's centre line rather than on its footprint, so walking in
+## from the gallery puts the brazier dead ahead.
 const INNER_MX := (GALLERY_LO.x + GALLERY_HI.x) / 2
-const INNER_HI := Vector3i(INNER_MX + LABY_SIZE / 2 - 1, HEAD, 40 * SCALE)
-const INNER_LO := Vector3i(INNER_HI.x - LABY_SIZE + 1, 0, INNER_HI.z - LABY_SIZE + 1)
+const INNER_HALF := 18 * SCALE
+const INNER_DEPTH := 36 * SCALE
+const INNER_HI := Vector3i(INNER_MX + INNER_HALF, HEAD, 40 * SCALE)
+const INNER_LO := Vector3i(INNER_MX - INNER_HALF, 0, INNER_HI.z - INNER_DEPTH + 1)
 
 ## The basin sunk into the cistern floor. The floor is not thickened for it -
 ## that would carry stone under the whole chamber to serve one corner of it -
@@ -118,29 +108,35 @@ func door_clear() -> Vector2:
 ## thread, so it is written to touch each voxel once where it can.
 func build() -> VoxelRoom:
 	var room := VoxelRoom.new()
-	# Walls keep the sandstone the ruin above is built from; the floor and
-	# ceiling are their own materials, so a chamber reads as built - flagstones
-	# underfoot, timber overhead - rather than as a stone box. The floor's own
-	# stone is darker and colder than the general-purpose `STONE` the
-	# furniture in `_furnish` is still cut from.
-	var sandstone := VoxelDefs.SANDSTONE
+	# Walls are dressed brick - the pale, warm stone a vault was built out of,
+	# rather than the raw sandstone of the cliffs the ruin above sits on. The
+	# floor and the ceiling are their own materials again, so a chamber reads
+	# as built: grey flagstone underfoot, boarded timber overhead.
+	var brick := VoxelDefs.BRICK
 	var floor_stone := VoxelDefs.FLOOR_STONE
 	var wood := VoxelDefs.WOOD
-	# The gallery alone is vaulted rather than flat-capped, so its ceiling is
-	# sandstone brick like the walls rather than the timber every other
-	# chamber is capped with - a barrel-vaulted stone corridor, not a room with
-	# a curved lid nailed on.
-	room.chamber(GALLERY_LO, GALLERY_HI, WALL, GALLERY_CAP, sandstone, floor_stone, sandstone)
+	# The gallery alone is vaulted rather than flat-capped: its timber is bent
+	# over a barrel arch instead of laid flat, which is the one place in the
+	# vault where the ceiling is worth looking at.
+	room.chamber(GALLERY_LO, GALLERY_HI, WALL, GALLERY_CAP, brick, floor_stone, wood)
 	room.vault_ceiling(GALLERY_LO, GALLERY_HI, GALLERY_RISE)
-	room.chamber(ANTE_LO, ANTE_HI, WALL, CAP, sandstone, floor_stone, wood)
-	room.chamber(CISTERN_LO, CISTERN_HI, WALL, CAP, sandstone, floor_stone, wood)
-	room.chamber(RELIC_LO, RELIC_HI, WALL, CAP, sandstone, floor_stone, wood)
-	room.chamber(INNER_LO, INNER_HI, WALL, CAP, sandstone, floor_stone, wood)
+	room.chamber(ANTE_LO, ANTE_HI, WALL, CAP, brick, floor_stone, wood)
+	room.chamber(CISTERN_LO, CISTERN_HI, WALL, CAP, brick, floor_stone, wood)
+	room.chamber(RELIC_LO, RELIC_HI, WALL, CAP, brick, floor_stone, wood)
+	room.chamber(INNER_LO, INNER_HI, WALL, CAP, brick, floor_stone, wood)
+	# Boarded after every ceiling is standing, and after the gallery's has been
+	# carved into its arch: the boarding follows whatever shape it finds, so
+	# curving a ceiling it had already been laid on would strip the timber
+	# straight back off again.
+	room.plank_ceiling(GALLERY_LO, GALLERY_HI, WALL, GALLERY_CAP, wood, 0x1a01)
+	room.plank_ceiling(ANTE_LO, ANTE_HI, WALL, CAP, wood, 0x1a02)
+	room.plank_ceiling(CISTERN_LO, CISTERN_HI, WALL, CAP, wood, 0x1a03)
+	room.plank_ceiling(RELIC_LO, RELIC_HI, WALL, CAP, wood, 0x1a04)
+	room.plank_ceiling(INNER_LO, INNER_HI, WALL, CAP, wood, 0x1a05)
 	_furnish(room)
-	_build_labyrinth(room)
-	# Cut last, so a maze wall or a piece of furniture that lands on a doorway
-	# never gets the last word: the way through is carved back open regardless
-	# of what stood there a moment before.
+	# Cut last, so a piece of furniture that lands on a doorway never gets the
+	# last word: the way through is carved back open regardless of what stood
+	# there a moment before.
 	_cut_doors(room)
 	_anchors()
 	return room
@@ -213,143 +209,27 @@ func _furnish(room: VoxelRoom) -> void:
 		Vector3i(RELIC_HI.x + 2 * SCALE, 13 * SCALE, 74 * SCALE), stone)
 	room.fill(Vector3i(88, 0, 81) * SCALE, Vector3i(108, 3, 85) * SCALE, sandstone)
 
-
-## Each of the labyrinth's cells has its own four walls, torn down between it
-## and whichever neighbours a depth-first search reaches it through - the same
-## recursive-backtracker every text-book maze generator uses, adapted from a
-## boolean per wall to a `Dictionary` keyed by direction rather than one struct
-## field each, since GDScript has no structs of its own.
-enum { N, S, E, W }
-
-
-## The labyrinth's own wall grid: `LABY_CELLS` x `LABY_CELLS` cells, each still
-## holding all four of its walls except where the search below has knocked one
-## down. Visits every cell exactly once, so the maze it leaves is the kind
-## with exactly one route between the entrance and any other cell, the middle
-## among them.
-func _laby_grid() -> Array:
-	var walls := []
-	var visited := []
-	walls.resize(LABY_CELLS)
-	visited.resize(LABY_CELLS)
-	for i in LABY_CELLS:
-		var col_w := []
-		var col_v := []
-		col_w.resize(LABY_CELLS)
-		col_v.resize(LABY_CELLS)
-		for j in LABY_CELLS:
-			col_w[j] = {N: true, S: true, E: true, W: true}
-			col_v[j] = false
-		walls[i] = col_w
-		visited[i] = col_v
-
-	# Fixed rather than drawn from the world seed: the vault is authored, and
-	# an authored building reads the same maze every time it is entered.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 0xFA6E
-	var start := _laby_entry_cell()
-	visited[start.x][start.y] = true
-	var stack: Array[Vector2i] = [start]
-	while not stack.is_empty():
-		var cur: Vector2i = stack.back()
-		var options := _laby_unvisited_neighbors(cur, visited)
-		if options.is_empty():
-			stack.pop_back()
-			continue
-		var nxt: Vector2i = options[rng.randi() % options.size()]
-		_laby_remove_wall(walls, cur, nxt)
-		visited[nxt.x][nxt.y] = true
-		stack.append(nxt)
-	return walls
+	# Inner sanctum: four squat piers standing clear of the walls, and a single
+	# low step ringing the middle of the floor, so the last brazier stands on
+	# something rather than in the centre of an empty box. The step is filled
+	# and then carved hollow again: the brazier and whoever comes to light it
+	# both stand on the floor itself, inside the ring, not on top of it.
+	var sc := _inner_center_voxel()
+	for dx: int in [-1, 1]:
+		for dz: int in [-1, 1]:
+			var px := sc.x + dx * 11 * SCALE
+			var pz := sc.y + dz * 11 * SCALE
+			room.fill(Vector3i(px - 2 * SCALE, 0, pz - 2 * SCALE),
+				Vector3i(px + 2 * SCALE, HEAD, pz + 2 * SCALE), sandstone)
+	room.fill(Vector3i(sc.x - 5 * SCALE, 0, sc.y - 5 * SCALE),
+		Vector3i(sc.x + 5 * SCALE, 1 * SCALE, sc.y + 5 * SCALE), stone)
+	room.carve(Vector3i(sc.x - 4 * SCALE, 0, sc.y - 4 * SCALE),
+		Vector3i(sc.x + 4 * SCALE, 1 * SCALE, sc.y + 4 * SCALE))
 
 
-## The cell's own unvisited neighbours - north, south, east, west, in that
-## order, exactly as the reference generator lists them.
-func _laby_unvisited_neighbors(cell: Vector2i, visited: Array) -> Array[Vector2i]:
-	var list: Array[Vector2i] = []
-	if cell.y > 0 and not visited[cell.x][cell.y - 1]:
-		list.append(Vector2i(cell.x, cell.y - 1))
-	if cell.y < LABY_CELLS - 1 and not visited[cell.x][cell.y + 1]:
-		list.append(Vector2i(cell.x, cell.y + 1))
-	if cell.x < LABY_CELLS - 1 and not visited[cell.x + 1][cell.y]:
-		list.append(Vector2i(cell.x + 1, cell.y))
-	if cell.x > 0 and not visited[cell.x - 1][cell.y]:
-		list.append(Vector2i(cell.x - 1, cell.y))
-	return list
-
-
-## Knocks down the one wall a and b share. Both sides are written, since a's
-## east is b's west and nothing else ever reads just one of them.
-func _laby_remove_wall(walls: Array, a: Vector2i, b: Vector2i) -> void:
-	if b.y == a.y - 1:
-		walls[a.x][a.y][N] = false
-		walls[b.x][b.y][S] = false
-	elif b.y == a.y + 1:
-		walls[a.x][a.y][S] = false
-		walls[b.x][b.y][N] = false
-	elif b.x == a.x + 1:
-		walls[a.x][a.y][E] = false
-		walls[b.x][b.y][W] = false
-	elif b.x == a.x - 1:
-		walls[a.x][a.y][W] = false
-		walls[b.x][b.y][E] = false
-
-
-## The low corner (voxels) of a cell's own open floor.
-func _laby_cell_x0(i: int) -> int:
-	return INNER_LO.x + i * (LABY_CELL + LABY_WALL)
-
-
-func _laby_cell_z0(j: int) -> int:
-	return INNER_LO.z + j * (LABY_CELL + LABY_WALL)
-
-
-## The cell nearest the door in from the gallery: centred on the maze's own
-## entrance column, in the row that borders the gallery. Increasing z is
-## increasing row, so that row is the last one.
-func _laby_entry_cell() -> Vector2i:
-	return Vector2i(LABY_CELLS / 2, LABY_CELLS - 1)
-
-
-## The cell in the dead centre of the maze, where the last brazier stands.
-func _laby_center_cell() -> Vector2i:
-	return Vector2i(LABY_CELLS / 2, LABY_CELLS / 2)
-
-
-## The middle of a cell's open floor, in metres.
-func _laby_cell_center(cell: Vector2i) -> Vector3:
-	var x := float(_laby_cell_x0(cell.x) + LABY_CELL / 2) * VS
-	var z := float(_laby_cell_z0(cell.y) + LABY_CELL / 2) * VS
-	return Vector3(x, 0.0, z)
-
-
-## Builds the labyrinth from its wall grid: a slab floor to ceiling wherever a
-## wall is still standing between two cells, and - regardless of whether
-## either of them is - a post at every junction where four cells meet, so two
-## walls that turn a corner there always actually join rather than leaving the
-## junction's own square as a gap on the diagonal.
-func _build_labyrinth(room: VoxelRoom) -> void:
-	var walls := _laby_grid()
-	var sandstone := VoxelDefs.SANDSTONE
-	for i in LABY_CELLS:
-		for j in LABY_CELLS:
-			var w: Dictionary = walls[i][j]
-			if w[E] and i < LABY_CELLS - 1:
-				room.fill(
-					Vector3i(_laby_cell_x0(i) + LABY_CELL, 0, _laby_cell_z0(j)),
-					Vector3i(_laby_cell_x0(i + 1) - 1, HEAD, _laby_cell_z0(j) + LABY_CELL - 1),
-					sandstone)
-			if w[S] and j < LABY_CELLS - 1:
-				room.fill(
-					Vector3i(_laby_cell_x0(i), 0, _laby_cell_z0(j) + LABY_CELL),
-					Vector3i(_laby_cell_x0(i) + LABY_CELL - 1, HEAD, _laby_cell_z0(j + 1) - 1),
-					sandstone)
-	for i in LABY_CELLS - 1:
-		for j in LABY_CELLS - 1:
-			room.fill(
-				Vector3i(_laby_cell_x0(i) + LABY_CELL, 0, _laby_cell_z0(j) + LABY_CELL),
-				Vector3i(_laby_cell_x0(i + 1) - 1, HEAD, _laby_cell_z0(j + 1) - 1),
-				sandstone)
+## The middle of the inner sanctum's floor, in voxels (x, z).
+func _inner_center_voxel() -> Vector2i:
+	return Vector2i((INNER_LO.x + INNER_HI.x) / 2, (INNER_LO.z + INNER_HI.z) / 2)
 
 
 ## The anchors, in metres. Everything that is not masonry is placed off these,
@@ -371,12 +251,13 @@ func _anchors() -> void:
 	# wall shines through it - nothing down here casts a shadow - and a brazier
 	# near a doorway is something to catch on in the dark, which at the far side
 	# of a gate the player has just earned is the worst possible place for it.
-	# The last of the three is what the maze is for, so it stands in the one
-	# cell every path through the labyrinth was built to lead to.
+	# The last of the three is what the gate is for, so it stands in the middle
+	# of the inner sanctum, inside its ring of piers.
+	var inner := _inner_center_voxel()
 	braziers = [
 		Vector3(float(19 * SCALE) * VS, 0.0, float(54 * SCALE) * VS),
 		Vector3(float(104 * SCALE) * VS, 0.0, float(54 * SCALE) * VS),
-		_laby_cell_center(_laby_center_cell()),
+		Vector3(float(inner.x) * VS, 0.0, float(inner.y) * VS),
 	]
 	wall_torches = _wall_torch_anchors()
 	clutter = _clutter_anchors()

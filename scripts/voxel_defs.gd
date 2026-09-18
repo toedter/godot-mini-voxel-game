@@ -63,15 +63,40 @@ const MORTAR := 29
 ## it sits between.
 const FLOOR_STONE := 30
 const FLOOR_MORTAR := 31
-## Tonal siblings of `SANDSTONE` and `FLOOR_STONE` that `VoxelRoom.mason` and
+## Tonal siblings of `BRICK` and `FLOOR_STONE` that `VoxelRoom.mason` and
 ## `mason_flagstone` pick between one whole stone at a time, so a course or a
 ## flagstone floor is quarried from several honestly different-coloured rocks
-## rather than one swatch stamped over and over.
+## rather than one swatch stamped over and over. `SANDSTONE` keeps its own
+## three for the ruin above.
 const SANDSTONE_LIGHT := 32
 const SANDSTONE_DARK := 33
 const SANDSTONE_WARM := 34
 const FLOOR_STONE_LIGHT := 35
 const FLOOR_STONE_DARK := 36
+const FLOOR_STONE_PALE := 37
+## The dressed brick a vault's walls are built from: paler and warmer than the
+## raw `SANDSTONE` the cliffs and the ruin above are made of, because a wall
+## quarried into blocks and laid by hand does not read as the rock it was cut
+## out of. Its own material rather than a recoloured `SANDSTONE` so that
+## retuning the vault's walls never moves the colour of the island.
+const BRICK := 38
+const BRICK_LIGHT := 39
+const BRICK_DARK := 40
+const BRICK_WARM := 41
+## Ceiling timber: the boards themselves in three tones, and the darker
+## `BEAM` the joists and every board-to-board seam are drawn in.
+const WOOD_LIGHT := 42
+const WOOD_DARK := 43
+const BEAM := 44
+## Half-tones standing between a stone and the groove of mortar beside it.
+## A voxel is either stone or mortar and nothing between, so a joint one voxel
+## wide is a hard step from one to the other and every seam in the vault reads
+## as the same stair-stepped line. Scattering these along the joint - only
+## some of the voxels on it, not all - dithers that step into two, which at
+## arm's length is what makes a wall read as rough masonry rather than as a
+## grid drawn on a screen.
+const MORTAR_EDGE := 45
+const FLOOR_MORTAR_EDGE := 46
 
 ## Mushroom species. Each one is a cap colour paired with the bioluminescent
 ## colour of its gills (which is also the colour of the light it throws). The
@@ -130,14 +155,24 @@ const COLORS := {
 	SEABED: Color(0.545, 0.520, 0.430),
 	SNOW: Color(0.930, 0.950, 0.980),
 	ICE: Color(0.735, 0.855, 0.925),
-	MORTAR: Color(0.195, 0.170, 0.145),
-	FLOOR_STONE: Color(0.300, 0.300, 0.310),
-	FLOOR_MORTAR: Color(0.150, 0.148, 0.155),
+	MORTAR: Color(0.195, 0.160, 0.122),
+	FLOOR_STONE: Color(0.310, 0.318, 0.336),
+	FLOOR_MORTAR: Color(0.072, 0.075, 0.084),
 	SANDSTONE_LIGHT: Color(0.760, 0.660, 0.470),
 	SANDSTONE_DARK: Color(0.560, 0.460, 0.300),
 	SANDSTONE_WARM: Color(0.630, 0.430, 0.255),
-	FLOOR_STONE_LIGHT: Color(0.380, 0.375, 0.385),
-	FLOOR_STONE_DARK: Color(0.225, 0.225, 0.235),
+	FLOOR_STONE_LIGHT: Color(0.450, 0.460, 0.482),
+	FLOOR_STONE_DARK: Color(0.170, 0.176, 0.190),
+	FLOOR_STONE_PALE: Color(0.565, 0.575, 0.598),
+	BRICK: Color(0.660, 0.560, 0.410),
+	BRICK_LIGHT: Color(0.755, 0.655, 0.500),
+	BRICK_DARK: Color(0.490, 0.395, 0.272),
+	BRICK_WARM: Color(0.605, 0.460, 0.300),
+	WOOD_LIGHT: Color(0.470, 0.330, 0.205),
+	WOOD_DARK: Color(0.300, 0.205, 0.130),
+	BEAM: Color(0.230, 0.155, 0.100),
+	MORTAR_EDGE: Color(0.400, 0.335, 0.245),
+	FLOOR_MORTAR_EDGE: Color(0.175, 0.180, 0.195),
 }
 
 ## Per-material strength of the random per-voxel brightness variation.
@@ -171,14 +206,24 @@ const TINT := {
 	SEABED: 0.20,
 	SNOW: 0.09,
 	ICE: 0.10,
-	MORTAR: 0.20,
-	FLOOR_STONE: 0.16,
-	FLOOR_MORTAR: 0.16,
+	MORTAR: 0.22,
+	FLOOR_STONE: 0.24,
+	FLOOR_MORTAR: 0.22,
 	SANDSTONE_LIGHT: 0.18,
 	SANDSTONE_DARK: 0.18,
 	SANDSTONE_WARM: 0.18,
-	FLOOR_STONE_LIGHT: 0.16,
-	FLOOR_STONE_DARK: 0.16,
+	FLOOR_STONE_LIGHT: 0.24,
+	FLOOR_STONE_DARK: 0.24,
+	FLOOR_STONE_PALE: 0.24,
+	BRICK: 0.26,
+	BRICK_LIGHT: 0.26,
+	BRICK_DARK: 0.26,
+	BRICK_WARM: 0.26,
+	WOOD_LIGHT: 0.10,
+	WOOD_DARK: 0.10,
+	BEAM: 0.09,
+	MORTAR_EDGE: 0.22,
+	FLOOR_MORTAR_EDGE: 0.24,
 }
 
 ## Materials drawn with the glow shader, and how brightly each one lights up

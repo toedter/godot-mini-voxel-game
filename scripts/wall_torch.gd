@@ -8,7 +8,7 @@ extends StaticBody3D
 ## Deliberately dim and short-ranged, and deliberately rare. The vault's own
 ## puzzle is finding three braziers in the dark, and a sconce that lit more
 ## than the room it stands in would be doing that puzzle's job for it. This
-## is mood at the threshold, not light carried into the maze - VaultPlan only
+## is mood at the threshold, not light carried into the dark - VaultPlan only
 ## ever places these in the antechamber, and this script has no opinion about
 ## that; it just burns wherever it is put.
 
